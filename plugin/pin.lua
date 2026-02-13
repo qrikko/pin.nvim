@@ -13,7 +13,27 @@ local function get_visual_selection()
 end
 
 local function pin_selection()
-        local sel = get_visual_selection()
+    local sel = get_visual_selection()
+
+    local bufnr = vim.api.nvim_get_current_buf()
+    local text = vim.fn.get_visual_selection()
+    local lines = vim.split(text, '\n')
+
+    -- Create a scratch buffer for the popup
+    local float_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
+    vim.api.nvim_set_option_value('filetype', vim.bo.filetype, { buf = float_buf })
+
+    -- Open the window
+    vim.api.nvim_open_win(float_buf, false, {
+        relative = 'editor',
+        row = 5,
+        col = 5,
+        width = 60,
+        height = #lines + 2,
+        style = 'minimal',
+        border = 'rounded'
+    })
 end
 
 local function pin_ts_node()
