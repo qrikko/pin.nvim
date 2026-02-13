@@ -31,4 +31,4 @@ local function pin_toggle()
     end
 end
 
-vim.api.nvim_create_user_command('Pin', pin_toggle, { nargs = 0})
+vim.api.nvim_create_user_command('Pin', function() pin_toggle() end, { nargs = 0})
