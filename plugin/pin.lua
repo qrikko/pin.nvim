@@ -2,10 +2,15 @@ local ns = vim.api.nvim_create_namespace('pinned_selection')
 local state = { extmark_id = nil, visible = false }
 
 local function get_visual_selection()
-    local sel = {}
-    sel.start = vim.fn.getpos("'<'")
-    sel.finish = vim.fn.getpos("'>'")
-    return sel
+    local start = vim.fn.getpos("'<'")
+    local finish = vim.fn.getpos("'>'")
+
+    return {
+        start_line  = start[2] -1,
+        start_col   = start[2] -1,
+        end_line    = start[2] -1,
+        end_col     = start[2] -1,
+    }
 end
 
 local function clear_pin()
@@ -26,8 +31,11 @@ local function pin_toggle()
             end_row = sel.finish,
             end_col = sel.finish,
         }
-        state.extmark_id = vim.api.nvim_buf_set_extmark(0, ns, sel.start, sel.finish, opts)
-        state.visible = true
+        state.extmark_id = vim.api.nvim_buf_set_extmark(0, ns, sel.start_line, sel.start_col, {
+            end_row = sel.end_line,
+            end_col = sel.end_col,
+            hl_group = "Visual",
+        })
     end
 end
 
