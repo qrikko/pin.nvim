@@ -7,10 +7,10 @@ M.config = {
     border = 'single',
     max_height = 15,
     keymaps = {
-        pin_ts              = '<leader>sp',
-        pin_visual          = '<leader>sp',
-        clear_all_pins      = '<leader>sc',
-        pin_pop             = '<leader>sdd',
+        pin_ts              = '<leader>ss',
+        pin_visual          = '<leader>ss',
+        clear_all_pins      = '<leader>sx',
+        pin_pop             = '<leader>sp',
         pin_remove          = '<leader>sd'
     }
 }
@@ -89,15 +89,51 @@ function M.setup(user_config)
     did_setup = true
 end
 
-function M.pin_remove()
+function M.pin_remove_interactive()
     if #M.pins == 0 then
         vim.notify("No pins to delete!")
         return
     end
+
+    for i, pin in ipairs(M.pins) do
+        if vim.api.nvim_win_is_valid(pin.win_id) then
+            vim.api.nvim_win_set_config(pin.win_id, {
+                title = " DELETE [" .. i .. "] ",
+                title_pos = "center"
+            })
+        end
+    end
+    vim.cmd('redraw')
+
+    vim.notify("󰐄 ")
+    local index = vim.fn.getchar()
+    M.pin_remove(vim.fn.nr2char(index))
+
+    for i, pin in ipairs(M.pins) do
+        if vim.api.nvim_win_is_valid(pin.win_id) then
+            vim.api.nvim_win_set_config(pin.win_id, {
+                title = " Pin " .. i .. " ",
+                title_pos = "right"
+            })
+        end
+    end
+    vim.cmd('redraw')
+    vim.api.nvim_echo({ { "", "" } }, false, {})
 end
 
-function M.pop_pin()
-    local pin = M.pins[#M.pins]
+function M.pin_remove(index)
+    if #M.pins == 0 then
+        vim.notify("No pins to delete!")
+        return
+    end
+
+    local idx = tonumber(index) or #M.pins
+    local pin = M.pins[idx]
+
+    if not pin then
+        vim.notify("Pin " .. tostring(idx) .. " not found")
+        return
+    end
 
     if vim.api.nvim_win_is_valid(pin.win_id) then
         vim.api.nvim_win_close(pin.win_id, true)
@@ -106,7 +142,8 @@ function M.pop_pin()
         vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_id)
     end
 
-    table.remove(M.pins)
+    table.remove(M.pins, idx)
+    update_pin_position()
 end
 
 function M.clear_pin()
