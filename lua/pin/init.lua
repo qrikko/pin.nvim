@@ -3,7 +3,7 @@ local ns_id = vim.api.nvim_create_namespace("PinPlugin")
 local did_setup = false
 
 M.config = {
-    winblend = 0,
+    winblend = 50,
     border = 'single',
     max_height = 15,
     keymaps = {
