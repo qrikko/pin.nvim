@@ -9,12 +9,12 @@ vim.api.nvim_create_user_command('PinVisual', function()
 end, { range = true })
 
 vim.api.nvim_create_user_command('PinPop', function()
-    require('pin').pop_pin()
+    require('pin').pin_remove()
 end, {})
 
-vim.api.nvim_create_user_command('PinRemove', function(opts)
-    require('pin').pin_remove(opts.args)
-end, { nargs = '?', desc = "Remove pin by id" })
+vim.api.nvim_create_user_command('PinRemove', function()
+    require('pin').pin_remove_interactive()
+end, { desc = "Remove pin by id" })
 
 vim.api.nvim_create_user_command('PinClear', function()
     require('pin').clear_pin()
