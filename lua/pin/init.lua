@@ -1,34 +1,12 @@
-local dbg = {}
+local M = {pins = {}}
 
-function dump(o)
-    if type(o) == 'table' then
-        local s = '{ '
-        for k,v in pairs(o) do
-            if type(k) ~= 'number' then k = '"'..k..'"' end
-            s = s .. '['..k..'] = ' .. dump(v) .. ','
-        end
-        return s .. '} '
-    else
-        return tostring(o)
+M.indexof = function(obj)
+    for i,v in ipairs(M.pins) do
+        if v == obj then return i end
     end
+    return nil
 end
 
-function dbg.log(_, text, action)
-    action = action or "a"
-    _.fout = io.open("/run/user/1000/npin.log", action)
-    if _.fout then
-        if type(text) == 'table' then
-            _.fout:write(dump(text))
-        else
-            _.fout:write(text .. "\n")
-        end
-        _.fout:close()
-    end
-end
-
-
-
-local M = { pins = {} }
 local ns_id = vim.api.nvim_create_namespace("PinPlugin")
 
 local main_window = vim.api.nvim_get_current_win()
@@ -37,7 +15,7 @@ local is_updating = false
 
 M.config = {
     winblend = 50,
-    border = 'single',
+    border = 'single', -- none, single, double, rounded, solid, shadow
     max_height = 15,
     keymaps = {
         pin_ts              = '<leader>ss',
@@ -65,21 +43,17 @@ local function update_pin_position()
     if #M.pins == 0 then return end
 
     local current_win = vim.api.nvim_get_current_win()
-    local current_buf = vim.api.nvim_get_current_buf()
     local gutter_w, usable_width = get_layout_details()
     local cursor_line = vim.api.nvim_win_get_cursor(current_win)[1]
-
-    local top_offset = 0
-    local bot_offset = 0
 
     for i, pin in ipairs(M.pins) do
         local final_row = 0
         if vim.api.nvim_win_is_valid(pin.win_id) then
-            local mark = vim.api.nvim_buf_get_extmark_by_id(pin.source_buf, ns_id, pin.mark_id, {})
-            local mark_start = mark[1] +1
+            local mark = vim.api.nvim_buf_get_extmark_by_id(pin.source_buf, ns_id, pin.mark_above, {})
+            local mark_start = mark[1]
             local mark_end = mark_start + pin.height + 1
 
-            local is_active = cursor_line >= mark_start and cursor_line <= mark_end
+            local is_active = cursor_line > mark_start and cursor_line < mark_end
 
             if is_active then
                 vim.api.nvim_set_current_win(pin.win_id)
@@ -88,7 +62,7 @@ local function update_pin_position()
                     local row,col = unpack(vim.api.nvim_win_get_cursor(0))
                     if row == pin.height then
                         vim.api.nvim_set_current_win(main_window)
-                        vim.api.nvim_win_set_cursor(main_window, {mark_start+pin.height+2, 0})
+                        vim.api.nvim_win_set_cursor(main_window, {mark_start+pin.height+1, col})
                     else
                         vim.api.nvim_feedkeys('j', 'n', false)
                     end
@@ -97,48 +71,33 @@ local function update_pin_position()
                     local row,col = unpack(vim.api.nvim_win_get_cursor(0))
                     if row == 1 then
                         vim.api.nvim_set_current_win(main_window)
-                        vim.api.nvim_win_set_cursor(main_window, {mark_start-1, 0})
+                        vim.api.nvim_win_set_cursor(main_window, {mark_start, col})
                     else
                         vim.api.nvim_feedkeys('k', 'n', false)
                     end
                 end, { buffer = pin.buf_id, silent = true })
-            end
 
-            --[[
-            if mark_start < top_visible + top_offset then
-                final_row = top_offset
-                top_offset = top_offset + pin.height + 2
-            elseif mark_end > bot_visible then
-                bot_offset = bot_offset + pin.height +2
-                final_row = mark_start - top_visible
-            else
-                final_row = mark_start - top_visible
+                vim.keymap.set('n', '<esc>', function()
+                    if pin.focus then
+                        M.pin_remove(M.indexof(pin))
+                    end
+                end, {silent = true})
             end
-            ]]
 
             local info = {
                 vim = vim.fn.getwininfo(main_window)[1],
                 pin = vim.fn.getwininfo(pin.win_id)[1],
                 nvim = vim.api.nvim_win_get_config(pin.win_id)
             }
-            dbg:log("main window: \n", "w")
-            dbg:log(info.vim)
-            dbg:log("\n")
-            dbg:log("pin window: \n")
-            dbg:log(info.pin)
 
             current_win = vim.api.nvim_get_current_win()
-            local top_visible = vim.fn.line("w0")
-            local bot_visible = vim.fn.line("w$") - 5
+            pin.focus = current_win == pin.win_id
 
             final_row = mark_start - info.vim.topline
-            --if current_win==pin.win_id then
-             --   final_row = top_visible
-            --end
-            vim.print("final row: " .. final_row)
 
             local border_hl = current_win==pin.win_id and "DiagnosticInfo" or "FloatBorder"
-            vim.api.nvim_set_option_value('winhighlight', 'FloatBorder:' .. border_hl, {win = pin.win_id})
+            --vim.api.nvim_set_option_value('winhighlight', 'FloatBorder:' .. border_hl, {win = pin.win_id})
+            vim.api.nvim_set_option_value('winhighlight', 'Normal:Pmenu,FloatBorder:Pmenu', { win = pin.win_id })
             vim.api.nvim_win_set_config(pin.win_id, {
                 title = " Pin " .. i .. (current_win==pin.win_id and " 󰿆 " or " 󰌾 "),
                 relative = 'win',
@@ -170,7 +129,6 @@ function M.setup(user_config)
         callback = function() update_pin_position() end
     })
 
-    dbg:log("", "w")
     did_setup = true
 end
 
@@ -224,7 +182,8 @@ function M.pin_remove(index)
         vim.api.nvim_win_close(pin.win_id, true)
     end
     if vim.api.nvim_buf_is_valid(pin.source_buf) then
-        vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_id)
+        vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_above)
+        vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_below)
     end
 
     table.remove(M.pins, idx)
@@ -238,20 +197,35 @@ function M.clear_pin()
         end
 
         if vim.api.nvim_buf_is_valid(pin.source_buf) then
-            vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_id)
+            vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_above)
+            vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_below)
         end
     end
     M.pins = {}
 end
 
 function M.create_pin(lines, start_line)
-    if #lines < 3 then return end
+    --if #lines < 3 then return end
 
     local gutter_w, usable_width = get_layout_details()
     local source_buf = vim.api.nvim_get_current_buf()
+
+    if vim.api.nvim_get_current_win() ~= main_window then
+        --M.pin_remove(M.indexof(pin))
+        return
+    end
+
     local ft = vim.bo.filetype
 
-    local mark_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, start_line, 0, {})
+    local pin_id_above = vim.api.nvim_buf_set_extmark(source_buf, ns_id, start_line+1, 0, {
+        virt_lines = { { { " ", "NonText" } } },
+        virt_lines_above = true,
+    })
+    local end_line = start_line + #lines
+    local pin_id_below = vim.api.nvim_buf_set_extmark(source_buf, ns_id, end_line, 0, {
+        virt_lines = { { { " ", "NonText" } } },
+        virt_lines_above = false,
+    })
     local float_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, lines)
     vim.api.nvim_set_option_value('modifiable', true, {buf = float_buf})
@@ -278,60 +252,27 @@ function M.create_pin(lines, start_line)
     local new_pin = {
         win_id = win_id,
         buf_id = float_buf,
-        mark_id = mark_id,
+        mark_above = pin_id_above,
+        mark_below = pin_id_below,
         source_buf = source_buf,
         height = display_height
     }
     table.insert(M.pins, new_pin)
 
-    vim.api.nvim_buf_attach(source_buf, false, {
-        on_lines = function(_, buf, _, _, _, _)
-            vim.schedule(function() M.sync_specific_pin(new_pin) end)
-        end
-    })
-
     vim.api.nvim_buf_attach(float_buf, false, {
         on_lines = function(_, _, _, firstline, lastline, new_lastline)
             local new_text = vim.api.nvim_buf_get_lines(float_buf, firstline, new_lastline, false)
-            local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, mark_id, {})
+            local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, mark_start_id, {})
             local source_start = mark[1] + firstline
             local source_end = mark[1] + lastline
 
-            vim.api.nvim_buf_set_lines(source_buf, source_start, source_end, false, new_text)
+            vim.schedule(function()
+                vim.api.nvim_buf_set_lines(source_buf, source_start+1, source_end+1, false, new_text)
+            end)
         end
     })
 
     update_pin_position()
-end
-
-function M.attach_sync(pin, source_buf)
-    vim.api.nvim_buf_attach(pin.buf_id, false, {
-        on_lines = function(_, _, _, firstline, lastline, _)
-            if is_updating then return end
-            is_updating = true
-
-            local lines = vim.api.nvim_buf_get_lines(pin.buf_id, 0, -1, false)
-            local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, pin.mark_id, {})
-            local start_row = mark[1]
-
-            vim.api.nvim_buf_set_lines(source_buf, start_row, start_row+#lines, false, lines)
-            is_updating = false
-        end
-    })
-
-    vim.api.nvim_buf_attach(source_buf, false, {
-        on_lines = function (_, _, _, firstline, lastline, _)
-            if is_updating then return end
-            is_updating = true
-
-            local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, pin.mark_id, {})
-            local start_row = mark[1]
-
-            local lines = vim.api.nvim_buf_get_lines(source_buf, start_row, start_row+pin.height, false)
-            vim.api.nvim_buf_set_lines(pin.buf_id, 0, -1, false, lines)
-            is_updating = false
-        end
-    })
 end
 
 function M.pin_ts_node()
@@ -343,16 +284,17 @@ function M.pin_ts_node()
 end
 
 function M.pin_visual_selection()
-    local spos = vim.fn.getpos("v")
-    local epos = vim.fn.getpos(".")
-    local sline = spos[2]
-    local eline = epos[2]
+    local spos = vim.fn.getpos("'<")[2]
+    local epos = vim.fn.getpos("'>")[2]
+    local sline = spos
+    local eline = epos
 
+    vim.print("spos: " .. spos .. ", epos: " .. epos)
     local from = math.min(sline, eline) -1
     local to = math.max(sline, eline)
 
     local lines = vim.api.nvim_buf_get_lines(0, from, to, false)
-    M.create_pin(lines, from)
+    M.create_pin(lines, from-1)
 end
 
 vim.schedule(function()
