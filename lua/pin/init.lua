@@ -49,18 +49,34 @@ function M.update_pin_position()
     if #M.pins == 0 then return end
 
     local current_win = vim.api.nvim_get_current_win()
-    local main_win_info = vim.fn.getwininfo(main_window)[1]
     local gutter_w, usable_width = get_layout_details()
 
+    local view = vim.api.nvim_win_call(main_window, function()
+        return vim.fn.winsaveview()
+    end)
+
+    local scroll_offset = (view.topline-1)
+
+    local dbgln = {}
     for i, pin in ipairs(M.pins) do
         local offset = (i-1)*2
-        if vim.api.nvim_win_is_valid(pin.win_id) then
-            local mark = vim.api.nvim_buf_get_extmark_by_id(pin.source_buf, ns_id, pin.mark_above, {})
-            local current_line = mark[1]
 
-            local screen_row = (current_line - (main_win_info.topline-1)) + 2*(#M.pins-1)
+        if vim.api.nvim_win_is_valid(pin.win_id) then
+            --local mark = vim.api.nvim_buf_get_extmark_by_id(pin.source_buf, ns_id, pin.mark_above, {})
+            --local current_line = mark[1]
+
+            --local screen_row = (current_line - (viewport.topline-1)) + 2*(#M.pins-1)
 
             local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
+            table.insert(
+                dbgln,
+                string.format("at row: %d, pin top: %d, toprow: %d, topfill: %d",
+                cursorpos, pin.spos, view.topline, view.topfill)
+            )
+
+            if pin.spos == view.topline then
+                scroll_offset = scroll_offset+view.topfill
+            end
 
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
@@ -82,13 +98,14 @@ function M.update_pin_position()
                 relative = 'win',
                 win = main_window,
                 --row = pin.mark_above - main_win_info.topline,
-                row = pin.spos+offset,
+                row = (pin.spos+offset) - (scroll_offset),
                 col = gutter_w,
                 width = usable_width,
                 height = pin.height
             })
         end
     end
+    vim.notify_once(table.concat(dbgln, "\n"))
 end
 
 function M.setup(user_config)
@@ -237,7 +254,6 @@ function M.create_pin(pin, lines)
 
     vim.keymap.set('n', 'j', function ()
         local row,col = unpack(vim.api.nvim_win_get_cursor(pin.win_id))
-        vim.print("row: " .. row .. ", height: " .. pin.height)
         if row == pin.height then
             vim.api.nvim_set_current_win(main_window)
             vim.api.nvim_win_set_cursor(main_window, {pin.epos+2, col})
