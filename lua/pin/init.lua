@@ -1,4 +1,4 @@
-local M = {pins = {}}
+local M = {pins = {}, topfill = 0}
 
 M.indexof = function(obj)
     for i,v in ipairs(M.pins) do
@@ -56,27 +56,22 @@ function M.update_pin_position()
     end)
 
     local scroll_offset = (view.topline-1)
+    local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
+    local globalpos, _ = vim.api.nvim_win_get_cursor(main_window)[1]
 
     local dbgln = {}
+    if view.topfill > 0 then
+        M.topfill = M.topfill
+    end
+
     for i, pin in ipairs(M.pins) do
         local offset = (i-1)*2
+        --table.insert(dbgln, string.format("pin top: %d", pin.spos))
 
         if vim.api.nvim_win_is_valid(pin.win_id) then
-            --local mark = vim.api.nvim_buf_get_extmark_by_id(pin.source_buf, ns_id, pin.mark_above, {})
-            --local current_line = mark[1]
-
-            --local screen_row = (current_line - (viewport.topline-1)) + 2*(#M.pins-1)
-
-            local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
-            table.insert(
-                dbgln,
-                string.format("at row: %d, pin top: %d, toprow: %d, topfill: %d",
-                cursorpos, pin.spos, view.topline, view.topfill)
-            )
-
-            if pin.spos == view.topline then
-                scroll_offset = scroll_offset+view.topfill
-            end
+            --if pin.spos == view.topline then
+                --M.topfill = M.topfill+1
+            --end
 
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
@@ -98,14 +93,19 @@ function M.update_pin_position()
                 relative = 'win',
                 win = main_window,
                 --row = pin.mark_above - main_win_info.topline,
-                row = (pin.spos+offset) - (scroll_offset),
+                row = (pin.spos+offset) - (scroll_offset+M.topfill),
                 col = gutter_w,
                 width = usable_width,
                 height = pin.height
             })
         end
     end
-    vim.notify_once(table.concat(dbgln, "\n"))
+    table.insert(
+        dbgln,
+        string.format("at row: %d, (global: %d), toprow: %d, M.topfill: %d",
+        cursorpos, globalpos, view.topline, M.topfill)
+    )
+    vim.notify(table.concat(dbgln, "\n"))
 end
 
 function M.setup(user_config)
