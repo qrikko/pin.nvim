@@ -61,7 +61,7 @@ function M.update_pin_position()
 
     local dbgln = {}
     if view.topfill > 0 then
-        M.topfill = M.topfill
+        M.topfill = M.topfill +1
     end
 
     for i, pin in ipairs(M.pins) do
@@ -88,14 +88,16 @@ function M.update_pin_position()
             local border_hl = pin.focus and "DiagnosticInfo" or "FloatBorder"
             vim.api.nvim_set_option_value('winhighlight', 'FloatBorder:' .. border_hl, {win = pin.win_id})
             --vim.api.nvim_set_option_value('winhighlight', 'Normal:Pmenu,FloatBorder:Pmenu', { win = pin.win_id })
+
+            local left_margin = 0
             vim.api.nvim_win_set_config(pin.win_id, {
                 title = " Pin " .. i .. (current_win==pin.win_id and " 󰿆 " or " 󰌾 "),
                 relative = 'win',
                 win = main_window,
                 --row = pin.mark_above - main_win_info.topline,
-                row = (pin.spos+offset) - (scroll_offset+M.topfill),
-                col = gutter_w,
-                width = usable_width,
+                row = ((pin.spos+offset) - scroll_offset)-view.topfill,
+                col = gutter_w+left_margin,
+                width = usable_width-left_margin,
                 height = pin.height
             })
         end
@@ -296,17 +298,41 @@ function M.pin_ts_node()
     local offset = #M.pins*2
     local spos, _, epos , _ = vim.treesitter.get_node_range(node)
 
+    local lines = vim.api.nvim_buf_get_lines(0, spos, epos+1, false)
+
+    --[[
+    local pin_buffer = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(pin_buffer, 0, -1, false, lines)
+
+    local win = vim.api.nvim_open_win(pin_buffer, false, {
+        relative = 'editor',
+        row = spos, col = 60,
+        width = 30, height = #lines,
+        style = 'minimal',
+        border = 'shadow',
+        zindex = 40,
+        noautocmd = true,
+    })
+    ]]
+
+
+    --local above = vim.api.nvim_buf_set_lines(0, 0, 0, false, { "----" })
+
     local pin_id_above = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, spos, 0, {
         virt_lines = { { { " ", "NonText" } } },
         virt_lines_above = true,
     })
 
+    --[[
+    local pin_id_above = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, epos, 0, {
+        virt_lines = { { { " ", "NonText" } } },
+        virt_lines_above = false,
+    })
+    ]]
     local pin_id_below = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, epos, 0, {
         virt_lines = { { { " ", "NonText" } } },
         virt_lines_above = false,
     })
-
-    local lines = vim.api.nvim_buf_get_lines(0, spos, epos+1, false)
 
     local new_pin = {
         win_id = nil,
