@@ -148,7 +148,6 @@ function M.update_pin_position()
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
             local pin_top = math.max(pin.spos, view.topline-1)
-            vim.print("viewtop: " .. view.topline .. ", pin.spos: " .. pin.spos .. ", mark pos: " .. pin_top)
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin_top, 0, {
                 id = pin.mark_pin_id,
                 sign_text = (current_win==pin.win_id and "󰿆 " or "󰌾 "),
@@ -157,7 +156,7 @@ function M.update_pin_position()
                 priority = 100
             })
 
-            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin.spos+1, 0, {
+            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin_top, 0, {
                 id = pin.mark_block_id,
                 sign_text = "  ",
                 sign_hl_group = pin_hl,
