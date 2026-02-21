@@ -69,19 +69,19 @@ M.config = {
     },
     lock_symbol = {
         norm = {
-            bg = "#c00ded",
-            fg = "#ff9e64",
+            bg = "#3c3246",
+            fg = "#ff995f",
             bold = true
         },
         hl = {
-            bg = "#fa7c0d",
-            fg = "#ff9e64",
+            bg = "#1e283c",
+            fg = "#ff995f",
             bold = true
         },
     },
     pin_window = {
-        norm = { bg = "#abcdef" },
-        hl = { bg = "#3487dd" }
+        norm = { bg = "#3c3246" },
+        hl = { bg = "#1e283c" }
     },
     backdrop = {
         bg = "#000000",
@@ -94,7 +94,7 @@ function M.setup(user_config)
 
     vim.api.nvim_set_hl(0, "pinvim_symbol_hl", {
         bg = M.config.lock_symbol.hl.bg,
-        fg = M.config.lock_symbol.fg,
+        fg = M.config.lock_symbol.hl.fg,
         bold=true
     })
     vim.api.nvim_set_hl(0, "pinvim_symbol_norm", {
