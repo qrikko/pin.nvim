@@ -131,7 +131,7 @@ function M.update_pin_position()
     local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
     local globalpos, _ = vim.api.nvim_win_get_cursor(main_window)[1]
 
-    for _, pin in ipairs(M.pins) do
+    for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
@@ -147,7 +147,10 @@ function M.update_pin_position()
             local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
-            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin.spos, 0, {
+            local pin_top = math.max(pin.spos, view.topline-1)
+            vim.print("viewtop: " .. view.topline .. ", pin.spos: " .. pin.spos .. ", mark pos: " .. pin_top)
+            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin_top, 0, {
+                id = pin.mark_pin_id,
                 sign_text = (current_win==pin.win_id and "󰿆 " or "󰌾 "),
                 sign_hl_group = lock_hl,
                 number_hl_group = lock_hl,
@@ -155,10 +158,12 @@ function M.update_pin_position()
             })
 
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin.spos+1, 0, {
+                id = pin.mark_block_id,
                 sign_text = "  ",
                 sign_hl_group = pin_hl,
                 number_hl_group = pin_hl,
-                end_line = pin.spos+pin.height-1
+                end_line = pin.spos+pin.height-1,
+                priority = 90
             })
             vim.api.nvim_set_option_value("winhighlight",
                 "Normal:" .. pin_hl .. "," ..
@@ -190,7 +195,7 @@ function M.pin_remove_interactive()
         if vim.api.nvim_win_is_valid(pin.win_id) then
             vim.api.nvim_win_set_config(pin.win_id, {
                 title = " DELETE [" .. i .. "] ",
-                title_pos = "center",
+                title_pos = "left",
                 border = "rounded"
             })
         end
@@ -234,10 +239,10 @@ function M.pin_remove(index)
     if vim.api.nvim_win_is_valid(pin.win_id) then
         vim.api.nvim_win_close(pin.win_id, true)
     end
-    if vim.api.nvim_buf_is_valid(pin.source_buf) then
-        --vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_above)
-        --vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_below)
-    end
+
+    local main_buffer = vim.api.nvim_win_get_buf(main_window)
+    vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_pin_id)
+    vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_block_id)
 
     table.remove(M.pins, idx)
     M.update_pin_position()
@@ -285,13 +290,14 @@ function M.create_pin(pin, lines)
     vim.api.nvim_set_option_value('filetype', ft, { buf = float_buf })
     pcall(vim.treesitter.start, float_buf, ft)
 
-    local mark_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {
+    pin.mark_block_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {
         sign_text = "  ",
         sign_hl_group = "pinvim_win_norm",
         number_hl_group = "pinvim_win_norm",
         end_row = pin.spos+#lines-1,
         priority = 100
     })
+    pin.mark_pin_id =   vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {})
 
     -- open the floating window with the buffer
     local win_id = vim.api.nvim_open_win(float_buf, false, {
