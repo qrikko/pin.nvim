@@ -92,19 +92,12 @@ M.config = {
 function M.setup(user_config)
     M.config = vim.tbl_deep_extend("force", M.config, user_config or {})
 
-    vim.api.nvim_set_hl(0, "pinvim_symbol_hl", {
-        bg = M.config.lock_symbol.hl.bg,
-        fg = M.config.lock_symbol.hl.fg,
-        bold=true
-    })
-    vim.api.nvim_set_hl(0, "pinvim_symbol_norm", {
-        bg = M.config.lock_symbol.norm.bg,
-        fg = M.config.lock_symbol.norm.fg,
-        bold=true
-    })
-    vim.api.nvim_set_hl(0, "pinvim_win_hl",     { bg = M.config.pin_window.hl.bg })
-    vim.api.nvim_set_hl(0, "pinvim_win_norm",   { bg = M.config.pin_window.norm.bg })
-    vim.api.nvim_set_hl(0, "pinvim_backdrop",   { bg = M.config.backdrop.bg, default = true })
+    local s = M.config.lock_symbol
+    vim.api.nvim_set_hl(0, "pinvim_symbol_hl",   { bg=s.hl.bg,   fg=s.hl.fg, bold=true })
+    vim.api.nvim_set_hl(0, "pinvim_symbol_norm", { bg=s.norm.bg, fg=s.norm.fg, bold=true })
+    vim.api.nvim_set_hl(0, "pinvim_win_hl",      { bg=M.config.pin_window.hl.bg })
+    vim.api.nvim_set_hl(0, "pinvim_win_norm",    { bg=M.config.pin_window.norm.bg })
+    vim.api.nvim_set_hl(0, "pinvim_backdrop",    { bg=M.config.backdrop.bg, default = true })
 
     if M.config.keymaps then
         vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinTS<CR>', {desc = "Pin TS Node"})
