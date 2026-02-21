@@ -17,7 +17,6 @@ end
 local ns_id = vim.api.nvim_create_namespace("PinPlugin")
 local main_window = vim.api.nvim_get_current_win()
 local did_setup = false
-local is_updating = false
 
 M.config = {
     winblend = 50,
@@ -33,6 +32,20 @@ M.config = {
         focus_prev          = '<leader>sp'
     }
 }
+
+local function adjust_brightness(color, percent)
+    local r, g, b = color:match("#(%x%x)(%x%x)(%x%x)")
+    r = tonumber(r, 16) * (1 + percent / 100)
+    g = tonumber(g, 16) * (1 + percent / 100)
+    b = tonumber(b, 16) * (1 + percent / 100)
+    return string.format("#%02x%02x%02x", math.min(r, 255), math.min(g, 255), math.min(b, 255))
+end
+
+local function get_contrast_bg(percent)
+    local hl = vim.api.nvim_get_hl(0, { name = "Normal" })
+    local bg = hl.bg and string.format("#%06x", hl.bg) or "#000000"
+    return adjust_brightness(bg, percent or 45)
+end
 
 local function get_layout_details(win_id)
     local info = {
@@ -59,20 +72,8 @@ function M.update_pin_position()
     local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
     local globalpos, _ = vim.api.nvim_win_get_cursor(main_window)[1]
 
-    local dbgln = {}
-    if view.topfill > 0 then
-        M.topfill = M.topfill +1
-    end
-
-    for i, pin in ipairs(M.pins) do
-        local offset = (i-1)*2
-        --table.insert(dbgln, string.format("pin top: %d", pin.spos))
-
+    for _, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
-            --if pin.spos == view.topline then
-                --M.topfill = M.topfill+1
-            --end
-
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
                 if is_active then
@@ -80,40 +81,42 @@ function M.update_pin_position()
                 end
             end
 
-            --vim.print("cursorpos: " .. cursorpos .. ", spos: " .. pin.spos .. ", epos: " .. pin.epos)
-
             current_win = vim.api.nvim_get_current_win()
             pin.focus = current_win == pin.win_id
 
-            --local border_hl = pin.focus and "DiagnosticInfo" or "FloatBorder"
-            --vim.api.nvim_set_option_value('winhighlight', 'FloatBorder:' .. border_hl, {win = pin.win_id})
-            --vim.api.nvim_set_option_value('winhighlight', 'Normal:Pmenu,FloatBorder:Pmenu', { win = pin.win_id })
-
             local main_buffer = vim.api.nvim_win_get_buf(main_window)
+            local pin_hl = current_win==pin.win_id and "pinwin_hl" or "pinwin_norm"
+            local lock_hl = current_win==pin.win_id and "pinvim_lock_hl" or "pinvim_lock_norm"
+
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin.spos, 0, {
                 sign_text = (current_win==pin.win_id and "󰿆 " or "󰌾 "),
-                sign_hl_group = "PinLocked",
+                sign_hl_group = lock_hl,
+                number_hl_group = lock_hl,
                 priority = 100
             })
+
+            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin.spos+1, 0, {
+                sign_text = "  ",
+                sign_hl_group = pin_hl,
+                number_hl_group = pin_hl,
+                end_line = pin.spos+pin.height-1
+            })
+            vim.api.nvim_set_option_value("winhighlight",
+                "Normal:" .. pin_hl .. "," ..
+                "FloatBorder:" .. pin_hl,
+                {win=pin.win_id}
+            )
             local left_margin = 0
             vim.api.nvim_win_set_config(pin.win_id, {
-                title = " Pin " .. i .. (current_win==pin.win_id and "󰿆 " or " 󰌾 "),
                 relative = 'win',
                 win = main_window,
                 row = pin.spos - view.topline + 1,
-                --row = ((pin.spos+offset) - scroll_offset)-view.topfill,
                 col = gutter_w+left_margin,
                 width = usable_width-left_margin,
                 height = pin.height
             })
         end
     end
-    table.insert(
-        dbgln,
-        string.format("at row: %d, (global: %d), toprow: %d, M.topfill: %d",
-        cursorpos, globalpos, view.topline, M.topfill)
-    )
-    vim.notify(table.concat(dbgln, "\n"))
 end
 
 function M.setup(user_config)
@@ -125,7 +128,6 @@ function M.setup(user_config)
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
         vim.keymap.set({'n','v'}, M.config.keymaps.clear_all_pins, ':PinClear<CR>', {desc = "Clear ALL Pins"})
---        vim.keymap.set('n', M.config.keymaps.focus_next, ':PinPop<CR>', {desc = "Pop the last Pin"})
     end
 
     local group = vim.api.nvim_create_augroup("PinScrollLogic", {clear = false})
@@ -154,7 +156,7 @@ function M.pin_remove_interactive()
     end
     vim.cmd('redraw')
 
-    vim.notify("󰐄 ")
+    vim.notify("󰐄 Remove pin by id:")
     local index = vim.fn.getchar()
     M.pin_remove(vim.fn.nr2char(index))
 
@@ -238,11 +240,19 @@ function M.create_pin(pin, lines)
     vim.api.nvim_set_option_value('filetype', ft, { buf = float_buf })
     pcall(vim.treesitter.start, float_buf, ft)
 
-    vim.api.nvim_set_hl(0, "PinLocked", {fg="#ff9e64", bold=true})
-    vim.api.nvim_set_hl(0, "PinLockBG", {bg="#1a1b26", blend=5})
+    local bgcol_hl = get_contrast_bg(70)
+    local bgcol_norm = get_contrast_bg(-20)
+
+    vim.api.nvim_set_hl(0, "pinvim_lock_hl",    { bg = bgcol_hl,    fg="#ff9e64", bold=true})
+    vim.api.nvim_set_hl(0, "pinvim_lock_norm",  { bg = bgcol_norm,  fg="#ff9e64", bold=true})
+    vim.api.nvim_set_hl(0, "pinwin_hl",         { bg = bgcol_hl })
+    vim.api.nvim_set_hl(0, "pinwin_norm",       { bg = bgcol_norm })
+
     local mark_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {
-        sign_text = "󰋇 ",
+        sign_text = "  ",
         sign_hl_group = "PinLocked",
+        number_hl_group = "pinwin_norm",
+        end_row = pin.spos+#lines-1,
         priority = 100
     })
 
@@ -258,9 +268,12 @@ function M.create_pin(pin, lines)
         title = " Pin " .. (#M.pins +1),
         title_pos = "right"
     })
-    vim.api.nvim_set_option_value('winhighlight', 'Normal:PinLockBG,FloatBorder:PinLockBG', {win=win_id})
-    --vim.api.nvim_set_option_value('winblend', M.config.winblend, { win = win_id })
-
+    local is_dark = vim.o.background == "dark"
+    vim.api.nvim_set_option_value("winhighlight",
+        "Normal:pinwin_norm," ..
+        "FloatBorder:pinwin_hl",
+        {win=win_id}
+    )
 
     -- populate and push pin to storage
     pin.win_id = win_id
@@ -316,45 +329,12 @@ function M.pin_ts_node()
     local spos, _, epos , _ = vim.treesitter.get_node_range(node)
 
     local lines = vim.api.nvim_buf_get_lines(0, spos, epos+1, false)
-
-    --[[
-    local pin_buffer = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(pin_buffer, 0, -1, false, lines)
-
-    local win = vim.api.nvim_open_win(pin_buffer, false, {
-        relative = 'editor',
-        row = spos, col = 60,
-        width = 30, height = #lines,
-        style = 'minimal',
-        border = 'shadow',
-        zindex = 40,
-        noautocmd = true,
-    })
-    ]]
-
-
-    --local above = vim.api.nvim_buf_set_lines(0, 0, 0, false, { "----" })
-
-    --[[
-    local pin_id_above = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, spos, 0, {
-        virt_lines = { { { " ", "NonText" } } },
-        virt_lines_above = true,
-    })
-
-    local pin_id_below = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, epos, 0, {
-        virt_lines = { { { " ", "NonText" } } },
-        virt_lines_above = false,
-    })
-
-    ]]
     local new_pin = {
         win_id = nil,
         buf_id = nil,
         source_buf = nil,
         spos = spos,
         epos = epos,
-    --    mark_above = pin_id_above,
-    --    mark_below = pin_id_below,
         top_line = 0,
         height = #lines
     }
@@ -366,20 +346,9 @@ function M.pin_visual_selection()
     local spos = vim.fn.getpos("'<")[2]-1
     local epos = vim.fn.getpos("'>")[2]-1
 
-    --vim.print("spos: " .. spos .. ", epos: " .. epos)
     local from = math.min(spos, epos)
     local to = math.max(spos, epos)
 
-    --[[
-    local pin_id_above = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, spos, 0, {
-        virt_lines = { { { " ", "NonText" } } },
-        virt_lines_above = true,
-    })
-    local pin_id_below = vim.api.nvim_buf_set_extmark(vim.api.nvim_get_current_buf(), ns_id, epos, 0, {
-        virt_lines = { { { " ", "NonText" } } },
-        virt_lines_above = false,
-    })
-    ]]
     local lines = vim.api.nvim_buf_get_lines(0, from, to, false)
 
     local new_pin = {
@@ -388,8 +357,6 @@ function M.pin_visual_selection()
         source_buf = nil,
         spos = spos,
         epos = epos,
-     --   mark_above = pin_id_above,
-     --   mark_below = pin_id_below,
         top_line = 0,
         height = epos-spos+1
     }
