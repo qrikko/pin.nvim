@@ -5,20 +5,6 @@ local main_window = vim.api.nvim_get_current_win()
 local backdrop_win = nil
 local did_setup = false
 
-local function adjust_brightness(color, percent)
-    local r, g, b = color:match("#(%x%x)(%x%x)(%x%x)")
-    r = tonumber(r, 16) * (1 + percent / 100)
-    g = tonumber(g, 16) * (1 + percent / 100)
-    b = tonumber(b, 16) * (1 + percent / 100)
-    return string.format("#%02x%02x%02x", math.min(r, 255), math.min(g, 255), math.min(b, 255))
-end
-
-local function get_contrast_bg(percent)
-    local hl = vim.api.nvim_get_hl(0, { name = "Normal" })
-    local bg = hl.bg and string.format("#%06x", hl.bg) or "#000000"
-    return adjust_brightness(bg, percent or 45)
-end
-
 local function get_layout_details(win_id)
     local info = {
         vim = vim.fn.getwininfo(win_id or main_window)[1],
