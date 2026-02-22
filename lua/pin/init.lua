@@ -145,13 +145,22 @@ function M.update_pin_position()
             local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
+            local pin_top   = math.min(pin.spos+scroll_top+pin.height, scroll_bottom)
+            pin_top         = math.max(pin.spos - scroll_top, 0)
+            vim.print("pin top: " .. pin_top .. ", top: " .. view.topline .. ", bottom: " .. scroll_bottom)
+
+            vim.api.nvim_win_set_config(pin.win_id, {
+                relative = 'win',
+                win = main_window,
+                row = pin_top,
+                col = gutter_w,
+                width = usable_width,
+                height = pin.height
+            })
+
 
             local sign_top_row = math.max(pin.spos, scroll_top)
             --local sign_bottom_row = math.min(sign_top_row+pin.height-1, scroll_bottom)
-
-            local pin_top = pin.spos - view.topline + 1
-            vim.print("pin top: " .. vim.api.nvim_win_get_position(pin.win_id)[1])
-            --local pin_top = math.max(vim.api.nvim_win_get_position(pin.win_id)[1]-scroll_top, 0)
 
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
@@ -166,14 +175,6 @@ function M.update_pin_position()
                 "FloatBorder:" .. pin_hl,
                 {win=pin.win_id}
             )
-            vim.api.nvim_win_set_config(pin.win_id, {
-                relative = 'win',
-                win = main_window,
-                row = pin_top,
-                col = gutter_w,
-                width = usable_width,
-                height = pin.height
-            })
         end
     end
 end
