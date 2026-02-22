@@ -129,10 +129,10 @@ function M.update_pin_position()
 
     local scroll_top = (view.topline-1)
     local scroll_bottom = vim.api.nvim_win_get_height(main_window)
-    local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
+    local cursorpos = vim.api.nvim_win_get_cursor(current_win)[1]
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
-    for i, pin in ipairs(M.pins) do
+    for _, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
