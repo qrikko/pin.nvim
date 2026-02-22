@@ -127,9 +127,10 @@ function M.update_pin_position()
         return vim.fn.winsaveview()
     end)
 
-    local scroll_offset = (view.topline-1)
+    local scroll_top = (view.topline-1)
+    local scroll_bottom = vim.api.nvim_win_get_height(main_window)
     local cursorpos, _ = vim.api.nvim_win_get_cursor(current_win)[1]
-    local globalpos, _ = vim.api.nvim_win_get_cursor(main_window)[1]
+    local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
     for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
@@ -139,16 +140,20 @@ function M.update_pin_position()
                     vim.api.nvim_set_current_win(pin.win_id)
                 end
             end
-
             current_win = vim.api.nvim_get_current_win()
-            pin.focus = current_win == pin.win_id
 
-            local main_buffer = vim.api.nvim_win_get_buf(main_window)
             local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
-            local pin_top = math.max(pin.spos, view.topline-1)
-            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin_top, 0, {
+
+            local sign_top_row = math.max(pin.spos, scroll_top)
+            --local sign_bottom_row = math.min(sign_top_row+pin.height-1, scroll_bottom)
+
+            local pin_top = pin.spos - view.topline + 1
+            vim.print("pin top: " .. vim.api.nvim_win_get_position(pin.win_id)[1])
+            --local pin_top = math.max(vim.api.nvim_win_get_position(pin.win_id)[1]-scroll_top, 0)
+
+            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
                 sign_text = (current_win==pin.win_id and "󰿆 " or "󰌾 "),
                 sign_hl_group = lock_hl,
@@ -156,26 +161,17 @@ function M.update_pin_position()
                 priority = 100
             })
 
-            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, pin_top, 0, {
-                id = pin.mark_block_id,
-                sign_text = "  ",
-                sign_hl_group = pin_hl,
-                number_hl_group = pin_hl,
-                end_line = pin.spos+pin.height-1,
-                priority = 90
-            })
             vim.api.nvim_set_option_value("winhighlight",
                 "Normal:" .. pin_hl .. "," ..
                 "FloatBorder:" .. pin_hl,
                 {win=pin.win_id}
             )
-            local left_margin = 0
             vim.api.nvim_win_set_config(pin.win_id, {
                 relative = 'win',
                 win = main_window,
-                row = pin.spos - view.topline + 1,
-                col = gutter_w+left_margin,
-                width = usable_width-left_margin,
+                row = pin_top,
+                col = gutter_w,
+                width = usable_width,
                 height = pin.height
             })
         end
@@ -241,7 +237,7 @@ function M.pin_remove(index)
 
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
     vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_pin_id)
-    vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_block_id)
+    --vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_block_id)
 
     table.remove(M.pins, idx)
     M.update_pin_position()
@@ -289,13 +285,6 @@ function M.create_pin(pin, lines)
     vim.api.nvim_set_option_value('filetype', ft, { buf = float_buf })
     pcall(vim.treesitter.start, float_buf, ft)
 
-    pin.mark_block_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {
-        sign_text = "  ",
-        sign_hl_group = "pinvim_win_norm",
-        number_hl_group = "pinvim_win_norm",
-        end_row = pin.spos+#lines-1,
-        priority = 100
-    })
     pin.mark_pin_id =   vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {})
 
     -- open the floating window with the buffer
