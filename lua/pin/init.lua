@@ -132,12 +132,26 @@ function M.update_pin_position()
     local cursorpos = vim.api.nvim_win_get_cursor(current_win)[1]
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
+    local top_stack_height = 0
+
+    for _, pin in ipairs(M.pins) do
+        local pin_top = pin.spos - scroll_top
+        pin._pinned = 0
+        if pin_top <= top_stack_height then
+            pin._pinned = 1
+            top_stack_height = top_stack_height + pin.height
+        end
+    end
+
+    top_stack_height = 0
     for _, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
                 if is_active then
                     vim.api.nvim_set_current_win(pin.win_id)
+                    local r,c = unpack(vim.api.nvim_win_get_cursor(main_window))
+                    vim.api.nvim_win_set_cursor(pin.win_id, {r-pin.spos, c})
                 end
             end
             current_win = vim.api.nvim_get_current_win()
@@ -146,8 +160,8 @@ function M.update_pin_position()
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
             local pin_top   = math.min(pin.spos+scroll_top+pin.height, scroll_bottom)
-            pin_top         = math.max(pin.spos - scroll_top, 0)
-            vim.print("pin top: " .. pin_top .. ", top: " .. view.topline .. ", bottom: " .. scroll_bottom)
+            pin_top         = math.max(pin.spos - scroll_top, top_stack_height)
+--            vim.print("pin top: " .. pin_top .. ", top: " .. view.topline .. ", bottom: " .. scroll_bottom)
 
             vim.api.nvim_win_set_config(pin.win_id, {
                 relative = 'win',
@@ -164,7 +178,7 @@ function M.update_pin_position()
 
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
-                sign_text = (current_win==pin.win_id and "󰿆 " or "󰌾 "),
+                sign_text = pin._pinned > 0 and " " or (current_win==pin.win_id and "󰿆 " or "󰌾 "),
                 sign_hl_group = lock_hl,
                 number_hl_group = lock_hl,
                 priority = 100
@@ -175,6 +189,10 @@ function M.update_pin_position()
                 "FloatBorder:" .. pin_hl,
                 {win=pin.win_id}
             )
+
+            if pin._pinned == 1 then
+                top_stack_height = top_stack_height + pin.height
+            end
         end
     end
 end
@@ -320,7 +338,11 @@ function M.create_pin(pin, lines)
             vim.api.nvim_set_current_win(main_window)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos+pin.height+1, col})
         else
-            vim.api.nvim_feedkeys('j', 'n', false)
+            if pin._pinned == 0 then
+                vim.api.nvim_feedkeys('j', 'n', false)
+            end
+            local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
+            vim.api.nvim_win_set_cursor(main_window, {mrow+1, mcol})
         end
     end, { buffer = float_buf, silent = true })
 
@@ -330,7 +352,11 @@ function M.create_pin(pin, lines)
             vim.api.nvim_set_current_win(main_window)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos, col})
         else
-            vim.api.nvim_feedkeys('k', 'n', false)
+            if pin._pinned == 0 then
+                vim.api.nvim_feedkeys('k', 'n', false)
+            end
+            local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
+            vim.api.nvim_win_set_cursor(main_window, {mrow-1, mcol})
         end
     end, { buffer = float_buf, silent = true })
 
