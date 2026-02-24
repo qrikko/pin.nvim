@@ -5,6 +5,10 @@ local main_window = vim.api.nvim_get_current_win()
 local backdrop_win = nil
 local did_setup = false
 
+local function clamp(value, min, max)
+  return math.max(min, math.min(max, value))
+end
+
 local function get_layout_details(win_id)
     local info = {
         vim = vim.fn.getwininfo(win_id or main_window)[1],
@@ -132,18 +136,25 @@ function M.update_pin_position()
     local cursorpos = vim.api.nvim_win_get_cursor(current_win)[1]
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
-    local top_stack_height = 0
+    local top     = vim.fn.line('w0', main_window) -1
+    local current   = vim.fn.line('.', main_window)
+    local bottom    = vim.fn.line('w$', main_window) - top
 
+    local top_stack = 0
+    local bottom_stack = 0
+
+    --[[
     for _, pin in ipairs(M.pins) do
         local pin_top = pin.spos - scroll_top
         pin._pinned = 0
-        if pin_top <= top_stack_height then
+        if pin_top <= top_stack then
             pin._pinned = 1
-            top_stack_height = top_stack_height + pin.height
+            top_stack = top_stack + pin.height
         end
     end
+    top_stack = 0
+    ]]
 
-    top_stack_height = 0
     for _, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             if pin.win_id ~= current_win then
@@ -159,8 +170,13 @@ function M.update_pin_position()
             local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
-            local pin_top   = math.min(pin.spos+scroll_top+pin.height, scroll_bottom)
-            pin_top         = math.max(pin.spos - scroll_top, top_stack_height)
+            vim.print("top: " .. top_stack .. ", bottom: " .. bottom_stack)
+            local pin_top = math.min(math.max(pin.spos-top, top_stack), bottom-bottom_stack-pin.height)
+            local pin_bottom = pin_top+pin.height
+            --local pin_top = pin.spos-top
+            --vim.print("top: " .. top ..  ", pin top: " .. pin_top .. ", pin bottom: " .. pin_bottom .. ", bottom: " .. bottom)
+            --local pin_top   = math.min(pin.spos+scroll_top+pin.height, scroll_bottom)
+            --pin_top         = math.max(pin.spos - scroll_top, top_stack)
 --            vim.print("pin top: " .. pin_top .. ", top: " .. view.topline .. ", bottom: " .. scroll_bottom)
 
             vim.api.nvim_win_set_config(pin.win_id, {
@@ -178,7 +194,7 @@ function M.update_pin_position()
 
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
-                sign_text = pin._pinned > 0 and " " or (current_win==pin.win_id and "󰿆 " or "󰌾 "),
+                sign_text = (pin_top <= top_stack or pin_bottom >= bottom) and " " or (current_win==pin.win_id and "󰿆 " or "󰌾 "),
                 sign_hl_group = lock_hl,
                 number_hl_group = lock_hl,
                 priority = 100
@@ -190,8 +206,11 @@ function M.update_pin_position()
                 {win=pin.win_id}
             )
 
-            if pin._pinned == 1 then
-                top_stack_height = top_stack_height + pin.height
+            if pin_top <= top_stack then
+                top_stack = top_stack + pin.height
+            end
+            if pin_bottom >= bottom then
+                bottom = bottom - pin.height
             end
         end
     end
@@ -308,10 +327,12 @@ function M.create_pin(pin, lines)
 
     -- open the floating window with the buffer
     local win_id = vim.api.nvim_open_win(float_buf, false, {
-        relative = 'editor',
+        relative = 'win',
+        win = main_window,
         style = 'minimal',
-        row = pin.spos, -- +offset,
-        col = 0, --gutter_w, -- Align exactly where text starts
+        bufpos = {pin.spos, 0},
+        --row = pin.spos, -- +offset,
+        --col = 0, --gutter_w, -- Align exactly where text starts
         width = usable_width,
         height = #lines,
         border = 'none',-- M.config.border,
@@ -338,11 +359,10 @@ function M.create_pin(pin, lines)
             vim.api.nvim_set_current_win(main_window)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos+pin.height+1, col})
         else
-            if pin._pinned == 0 then
-                vim.api.nvim_feedkeys('j', 'n', false)
-            end
-            local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
-            vim.api.nvim_win_set_cursor(main_window, {mrow+1, mcol})
+            vim.api.nvim_feedkeys('j', 'n', false)
+            vim.cmd("normal! zz")
+        --    local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
+        --    vim.api.nvim_win_set_cursor(main_window, {mrow+1, mcol})
         end
     end, { buffer = float_buf, silent = true })
 
@@ -352,11 +372,12 @@ function M.create_pin(pin, lines)
             vim.api.nvim_set_current_win(main_window)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos, col})
         else
-            if pin._pinned == 0 then
-                vim.api.nvim_feedkeys('k', 'n', false)
-            end
+            vim.api.nvim_feedkeys('k', 'n', false)
+            vim.cmd("normal! zz")
+            --[[
             local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
             vim.api.nvim_win_set_cursor(main_window, {mrow-1, mcol})
+            ]]
         end
     end, { buffer = float_buf, silent = true })
 
