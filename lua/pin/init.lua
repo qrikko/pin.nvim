@@ -423,6 +423,16 @@ function M.create_pin(pin, lines)
         end
     end, { buffer = float_buf, silent = true })
 
+    vim.keymap.set('n', 'G', function()
+        vim.api.nvim_set_current_win(main_window)
+        vim.cmd("normal! G")
+    end, { buffer = float_buf, silent = true })
+
+    vim.keymap.set('n', 'gg', function()
+        vim.api.nvim_set_current_win(main_window)
+        vim.cmd("normal! gg")
+    end, { buffer = float_buf, silent = true })
+
     vim.api.nvim_create_autocmd('CmdLineEnter', {
         callback = function()
             local cmd = vim.fn.getcmdline()
