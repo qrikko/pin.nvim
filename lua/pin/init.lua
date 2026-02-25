@@ -72,21 +72,29 @@ M.config = {
         focus_prev          = '<leader>sp',
         focus_pin           = '<leader>sg'
     },
-    lock_symbol = {
-        norm = {
-            bg = "#3c3246",
+    symbol = {
+        locked = {
+            bg = "#1a1024",
             fg = "#ff995f",
-            bold = true
+            sym = "󰌾 ",
+            bold = true,
+            winhighlight = "Normal:pinvim_window_locked,FloatBorder:pinvim_window_locked",
+
         },
-        hl = {
-            bg = "#1e283c",
+        unlocked = {
+            bg = "#11071b",
             fg = "#ff995f",
-            bold = true
+            sym = "󰿆 ",
+            bold = true,
+            winhighlight = "Normal:pinvim_window_unlocked,FloatBorder:pinvim_window_unlocked"
         },
-    },
-    pin_window = {
-        norm = { bg = "#3c3246" },
-        hl = { bg = "#1e283c" }
+        pinned = {
+            bg = "#2e2439",
+            fg = "#ff995f",
+            sym = " ",
+            bold = true,
+            winhighlight = "Normal:pinvim_window_pinned,FloatBorder:pinvim_window_pinned"
+        },
     },
     backdrop = {
         bg = "#000000",
@@ -97,11 +105,15 @@ M.config = {
 function M.setup(user_config)
     M.config = vim.tbl_deep_extend("force", M.config, user_config or {})
 
-    local s = M.config.lock_symbol
-    vim.api.nvim_set_hl(0, "pinvim_symbol_hl",   { bg=s.hl.bg,   fg=s.hl.fg, bold=true })
-    vim.api.nvim_set_hl(0, "pinvim_symbol_norm", { bg=s.norm.bg, fg=s.norm.fg, bold=true })
-    vim.api.nvim_set_hl(0, "pinvim_win_hl",      { bg=M.config.pin_window.hl.bg })
-    vim.api.nvim_set_hl(0, "pinvim_win_norm",    { bg=M.config.pin_window.norm.bg })
+    local s = M.config.symbol
+    vim.api.nvim_set_hl(0, "pinvim_symbol_locked",      { bg=s.locked.bg, fg=s.locked.fg, bold=s.locked.bold })
+    vim.api.nvim_set_hl(0, "pinvim_symbol_unlocked",    { bg=s.unlocked.bg, fg=s.unlocked.fg, bold=s.unlocked.bold })
+    vim.api.nvim_set_hl(0, "pinvim_symbol_pinned",      { bg=s.pinned.bg, fg=s.pinned.fg, bold=s.pinned.bold })
+
+    vim.api.nvim_set_hl(0, "pinvim_window_locked",     { bg=s.locked.bg })
+    vim.api.nvim_set_hl(0, "pinvim_window_unlocked",   { bg=s.unlocked.bg })
+    vim.api.nvim_set_hl(0, "pinvim_window_pinned",     { bg=s.pinned.bg, fg=s.pinned.fg })
+
     vim.api.nvim_set_hl(0, "pinvim_backdrop",    { bg=M.config.backdrop.bg, default = true })
 
     if M.config.keymaps then
@@ -137,7 +149,6 @@ function M.update_pin_position()
     end)
 
     local scroll_top = (view.topline-1)
-    local scroll_bottom = vim.api.nvim_win_get_height(main_window)
     local cursorpos = vim.api.nvim_win_get_cursor(current_win)[1]
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
@@ -161,12 +172,23 @@ function M.update_pin_position()
             end
             current_win = vim.api.nvim_get_current_win()
 
-            local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
-            local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
-
             local pin_top = math.min(math.max(pin.spos-top, top_stack), bottom-pin.height)
             local pin_bottom = pin_top+pin.height
-            --local pin_top = pin.spos-top
+
+            local state = nil
+            if pin_top <= top_stack or pin_bottom >= bottom then
+                state = M.config.symbol.pinned
+                state.sym_hl = "pinvim_symbol_pinned"
+                state.win_hl = "pinvim_window_pinned"
+            elseif current_win==pin.win_id then
+                state = M.config.symbol.unlocked
+                state.sym_hl = "pinvim_symbol_unlocked"
+                state.win_hl = "pinvim_window_unlocked"
+            else
+                state = M.config.symbol.locked
+                state.sym_hl = "pinvim_symbol_locked"
+                state.win_hl = "pinvim_window_locked"
+            end
 
             vim.api.nvim_win_set_config(pin.win_id, {
                 relative = 'win',
@@ -174,28 +196,22 @@ function M.update_pin_position()
                 row = pin_top,
                 col = gutter_w,
                 width = usable_width,
-                height = pin.height
+                height = pin.height,
+                focusable = false,
             })
-
 
             local sign_top_row = math.max(pin.spos, scroll_top+top_stack)
             sign_top_row = math.min(sign_top_row, buf_bottom-pin.height-bottom_stack)
 
-            --vim.print("sign_top_row: " .. sign_top_row .. ", buf_bottom: " .. buf_bottom)
-
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
-                sign_text = (pin_top <= top_stack or pin_bottom >= bottom) and " " or (current_win==pin.win_id and "󰿆 " or "󰌾 "),
-                sign_hl_group = lock_hl,
-                number_hl_group = lock_hl,
+                sign_text = state.sym,
+                sign_hl_group = state.sym_hl,
+                number_hl_group = state.sym_hl,
                 priority = 100
             })
 
-            vim.api.nvim_set_option_value("winhighlight",
-                "Normal:" .. pin_hl .. "," ..
-                "FloatBorder:" .. pin_hl,
-                {win=pin.win_id}
-            )
+            vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
 
             if pin_top <= top_stack then
                 top_stack = top_stack + pin.height
@@ -210,7 +226,7 @@ end
 
 function M.select_interactive(prompt)
     if #M.pins == 0 then
-        vim.notify("There is no pins!")
+        vim.notify("No selectable pins!")
         return
     end
 
@@ -249,7 +265,6 @@ end
 function M.pin_remove_interactive()
     local index = M.select_interactive("󰐄 Remove pin by id:")
 
-    vim.notify("remove pin with index: " .. index)
     if index ~= nil then
         M.pin_remove(index)
     end
@@ -275,7 +290,6 @@ function M.pin_remove(index)
 
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
     vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_pin_id)
-    --vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_block_id)
 
     table.remove(M.pins, index)
     M.update_pin_position()
@@ -297,7 +311,10 @@ function M.clear_pin()
 end
 
 function M.pin_focus_interactive()
-    M.pin_focus(M.select_interactive("󱔔 Jump to pin by id:"))
+    local index = M.select_interactive("󱔔 Jump to pin by id:")
+    if index then
+        M.pin_focus(index)
+    end
 end
 
 function M.pin_focus(id)
@@ -353,12 +370,13 @@ function M.create_pin(pin, lines)
         height = #lines,
         border = 'none',-- M.config.border,
         title = " Pin " .. (#M.pins +1),
-        title_pos = "right"
+        title_pos = "right",
+        focusable = false,
     })
     local is_dark = vim.o.background == "dark"
     vim.api.nvim_set_option_value("winhighlight",
-        "Normal:pinvim_win_norm," ..
-        "FloatBorder:pinvim_win_hl",
+        "Normal:pinvim_window_unlocked," ..
+        "FloatBorder:pinvim_window_locked",
         {win=win_id}
     )
 
@@ -397,6 +415,18 @@ function M.create_pin(pin, lines)
             ]]
         end
     end, { buffer = float_buf, silent = true })
+
+    vim.api.nvim_create_autocmd('CmdLineEnter', {
+        callback = function()
+            local cmd = vim.fn.getcmdline()
+            vim.fn.setcmdline('')
+            vim.defer_fn(function()
+                vim.api.nvim_set_current_win(main_window)
+                vim.cmd(cmd)
+            end, 0)
+        end,
+        desc = "Redirect cmdline to main window"
+    })
 
     -- setup handling for changes to keep main buffer synced with the floating window
     --[[
