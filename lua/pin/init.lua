@@ -105,6 +105,8 @@ M.config = {
 function M.setup(user_config)
     M.config = vim.tbl_deep_extend("force", M.config, user_config or {})
 
+    M.scrolloff = vim.o.scrolloff
+
     local s = M.config.symbol
     vim.api.nvim_set_hl(0, "pinvim_symbol_locked",      { bg=s.locked.bg, fg=s.locked.fg, bold=s.locked.bold })
     vim.api.nvim_set_hl(0, "pinvim_symbol_unlocked",    { bg=s.unlocked.bg, fg=s.unlocked.fg, bold=s.unlocked.bold })
@@ -222,6 +224,11 @@ function M.update_pin_position()
             end
         end
     end
+
+    --local scrolloff = math.max(M.scrolloff, math.max(top_stack+2, bottom_stack+2))
+    local scrolloff = M.scrolloff + math.max(top_stack+2, bottom_stack+2)
+    vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
+    
 end
 
 function M.select_interactive(prompt)
