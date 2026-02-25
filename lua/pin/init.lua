@@ -228,7 +228,6 @@ function M.update_pin_position()
     --local scrolloff = math.max(M.scrolloff, math.max(top_stack+2, bottom_stack+2))
     local scrolloff = M.scrolloff + math.max(top_stack+2, bottom_stack+2)
     vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
-    
 end
 
 function M.select_interactive(prompt)
@@ -371,8 +370,6 @@ function M.create_pin(pin, lines)
         win = main_window,
         style = 'minimal',
         bufpos = {pin.spos, 0},
-        --row = pin.spos, -- +offset,
-        --col = 0, --gutter_w, -- Align exactly where text starts
         width = usable_width,
         height = #lines,
         border = 'none',-- M.config.border,
@@ -446,20 +443,20 @@ function M.create_pin(pin, lines)
     })
 
     -- setup handling for changes to keep main buffer synced with the floating window
-    --[[
     vim.api.nvim_buf_attach(float_buf, false, {
         on_lines = function(_, _, _, firstline, lastline, new_lastline)
             local new_text = vim.api.nvim_buf_get_lines(float_buf, firstline, new_lastline, false)
-            local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, mark_start_id, {})
-            local source_start = mark[1] + firstline
-            local source_end = mark[1] + lastline
+            --local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, mark_start_id, {})
+            local pin_pos = pin.spos + vim.fn.line('.') -1
+
+            --local source_start = pin.spos + firstline
+            --local source_end = pin.spos+pin.height + lastline
 
             vim.schedule(function()
-                vim.api.nvim_buf_set_lines(source_buf, source_start+1, source_end+1, false, new_text)
+                vim.api.nvim_buf_set_lines(source_buf, pin_pos, pin_pos+1, false, new_text)
             end)
         end
     })
-    ]]
 
     M.update_pin_position()
 end
