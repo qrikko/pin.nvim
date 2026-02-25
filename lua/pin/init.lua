@@ -5,10 +5,6 @@ local main_window = vim.api.nvim_get_current_win()
 local backdrop_win = nil
 local did_setup = false
 
-local function clamp(value, min, max)
-  return math.max(min, math.min(max, value))
-end
-
 local function get_layout_details(win_id)
     local info = {
         vim = vim.fn.getwininfo(win_id or main_window)[1],
