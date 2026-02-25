@@ -69,7 +69,8 @@ M.config = {
         pin_pop             = '<leader>sp',
         pin_remove          = '<leader>sd',
         focus_next          = '<leader>sn',
-        focus_prev          = '<leader>sp'
+        focus_prev          = '<leader>sp',
+        focus_pin           = '<leader>sg'
     },
     lock_symbol = {
         norm = {
@@ -108,6 +109,10 @@ function M.setup(user_config)
         vim.keymap.set('v', M.config.keymaps.pin_visual, ':PinVisual<CR>', {desc = "Pin Visual Selection"})
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
+        vim.keymap.set('n', M.config.keymaps.focus_next, ':PinFocusNext<CR>', {desc = "Jump to next pin"})
+        vim.keymap.set('n', M.config.keymaps.focus_prev, ':PinFocusPrev<CR>', {desc = "Jump to next pin"})
+        vim.keymap.set('n', M.config.keymaps.focus_pin, ':PinFocusVisual<CR>', {desc = "Select pin interactively and jump to it"})
+
         vim.keymap.set({'n','v'}, M.config.keymaps.clear_all_pins, ':PinClear<CR>', {desc = "Clear ALL Pins"})
     end
 
@@ -143,7 +148,7 @@ function M.update_pin_position()
     local top_stack = 0
     local bottom_stack = 0
 
-    for _, pin in ipairs(M.pins) do
+    for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             if pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
@@ -151,6 +156,7 @@ function M.update_pin_position()
                     vim.api.nvim_set_current_win(pin.win_id)
                     local r,c = unpack(vim.api.nvim_win_get_cursor(main_window))
                     vim.api.nvim_win_set_cursor(pin.win_id, {r-pin.spos, c})
+                    M.focused_id = i
                 end
             end
             current_win = vim.api.nvim_get_current_win()
@@ -202,9 +208,9 @@ function M.update_pin_position()
     end
 end
 
-function M.pin_remove_interactive()
+function M.select_interactive(prompt)
     if #M.pins == 0 then
-        vim.notify("No pins to delete!")
+        vim.notify("There is no pins!")
         return
     end
 
@@ -213,7 +219,7 @@ function M.pin_remove_interactive()
     for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
             vim.api.nvim_win_set_config(pin.win_id, {
-                title = " DELETE [" .. i .. "] ",
+                title = " #ID [" .. i .. "] ",
                 title_pos = "left",
                 border = "rounded"
             })
@@ -221,10 +227,8 @@ function M.pin_remove_interactive()
     end
     vim.cmd('redraw')
 
-    vim.notify("󰐄 Remove pin by id:")
-    local index = vim.fn.getchar()
-    --M.pin_remove(index)
-    M.pin_remove(vim.fn.nr2char(index))
+    vim.notify(prompt)
+    local result = vim.fn.getchar() - 48
 
     for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
@@ -235,10 +239,20 @@ function M.pin_remove_interactive()
             })
         end
     end
-
     close_backdrop()
     vim.cmd('redraw')
     vim.api.nvim_echo({ { "", "" } }, false, {})
+
+    return result
+end
+
+function M.pin_remove_interactive()
+    local index = M.select_interactive("󰐄 Remove pin by id:")
+
+    vim.notify("remove pin with index: " .. index)
+    if index ~= nil then
+        M.pin_remove(index)
+    end
 end
 
 function M.pin_remove(index)
@@ -247,11 +261,11 @@ function M.pin_remove(index)
         return
     end
 
-    local idx = tonumber(index) or #M.pins
-    local pin = M.pins[idx]
+    --local idx = tonumber(index) or #M.pins
+    local pin = M.pins[index]
 
     if not pin then
-        vim.notify("Pin " .. tostring(idx) .. " not found")
+        vim.notify("Pin " .. tostring(index) .. " not found")
         return
     end
 
@@ -263,7 +277,7 @@ function M.pin_remove(index)
     vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_pin_id)
     --vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_block_id)
 
-    table.remove(M.pins, idx)
+    table.remove(M.pins, index)
     M.update_pin_position()
 end
 
@@ -280,6 +294,30 @@ function M.clear_pin()
     for i = #M.pins, 1, -1 do
         M.pin_remove(i)
     end
+end
+
+function M.pin_focus_interactive()
+    M.pin_focus(M.select_interactive("󱔔 Jump to pin by id:"))
+end
+
+function M.pin_focus(id)
+    local pin = M.pins[id]
+    vim.api.nvim_win_set_cursor(main_window, {pin.spos+1, 0})
+    vim.api.nvim_set_current_win(pin.win_id)
+    vim.api.nvim_win_set_cursor(pin.win_id, {1, 0})
+    M.focused_id = id
+end
+
+function M.pin_focus_next()
+    M.focused_id = M.focused_id + 1
+    local id = (M.focused_id > #M.pins) and 1 or M.focused_id
+    M.pin_focus(id)
+end
+
+function M.pin_focus_prev()
+    M.focused_id = M.focused_id - 1
+    local id = (M.focused_id < 1) and #M.pins or M.focused_id
+    M.pin_focus(id)
 end
 
 function M.create_pin(pin, lines)
@@ -330,6 +368,7 @@ function M.create_pin(pin, lines)
     pin.source_buf = source_buf
     pin.height = #lines
     table.insert(M.pins, pin)
+    M.pins.focused_id = #M.pins
 
     vim.keymap.set('n', 'j', function ()
         local row,col = unpack(vim.api.nvim_win_get_cursor(pin.win_id))

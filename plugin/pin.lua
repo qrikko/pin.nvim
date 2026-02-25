@@ -19,3 +19,15 @@ end, { desc = "Remove pin by id" })
 vim.api.nvim_create_user_command('PinClear', function()
     require('pin').clear_pin()
 end, {})
+
+vim.api.nvim_create_user_command('PinFocusNext', function()
+    require('pin').pin_focus_next()
+end, {})
+
+vim.api.nvim_create_user_command('PinFocusPrev', function()
+    require('pin').pin_focus_prev()
+end, {})
+
+vim.api.nvim_create_user_command('PinFocusVisual', function()
+    require('pin').pin_focus_interactive()
+end, {})
