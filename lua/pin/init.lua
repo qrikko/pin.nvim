@@ -137,23 +137,11 @@ function M.update_pin_position()
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
     local top     = vim.fn.line('w0', main_window) -1
-    local current   = vim.fn.line('.', main_window)
     local bottom    = vim.fn.line('w$', main_window) - top
+    local buf_bottom = vim.fn.line('w$', main_window)
 
     local top_stack = 0
     local bottom_stack = 0
-
-    --[[
-    for _, pin in ipairs(M.pins) do
-        local pin_top = pin.spos - scroll_top
-        pin._pinned = 0
-        if pin_top <= top_stack then
-            pin._pinned = 1
-            top_stack = top_stack + pin.height
-        end
-    end
-    top_stack = 0
-    ]]
 
     for _, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
@@ -170,14 +158,9 @@ function M.update_pin_position()
             local pin_hl = current_win==pin.win_id and "pinvim_win_hl" or "pinvim_win_norm"
             local lock_hl = current_win==pin.win_id and "pinvim_symbol_hl" or "pinvim_symbol_norm"
 
-            vim.print("top: " .. top_stack .. ", bottom: " .. bottom_stack)
-            local pin_top = math.min(math.max(pin.spos-top, top_stack), bottom-bottom_stack-pin.height)
+            local pin_top = math.min(math.max(pin.spos-top, top_stack), bottom-pin.height)
             local pin_bottom = pin_top+pin.height
             --local pin_top = pin.spos-top
-            --vim.print("top: " .. top ..  ", pin top: " .. pin_top .. ", pin bottom: " .. pin_bottom .. ", bottom: " .. bottom)
-            --local pin_top   = math.min(pin.spos+scroll_top+pin.height, scroll_bottom)
-            --pin_top         = math.max(pin.spos - scroll_top, top_stack)
---            vim.print("pin top: " .. pin_top .. ", top: " .. view.topline .. ", bottom: " .. scroll_bottom)
 
             vim.api.nvim_win_set_config(pin.win_id, {
                 relative = 'win',
@@ -189,8 +172,10 @@ function M.update_pin_position()
             })
 
 
-            local sign_top_row = math.max(pin.spos, scroll_top)
-            --local sign_bottom_row = math.min(sign_top_row+pin.height-1, scroll_bottom)
+            local sign_top_row = math.max(pin.spos, scroll_top+top_stack)
+            sign_top_row = math.min(sign_top_row, buf_bottom-pin.height-bottom_stack)
+
+            --vim.print("sign_top_row: " .. sign_top_row .. ", buf_bottom: " .. buf_bottom)
 
             vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
                 id = pin.mark_pin_id,
@@ -211,6 +196,7 @@ function M.update_pin_position()
             end
             if pin_bottom >= bottom then
                 bottom = bottom - pin.height
+                bottom_stack = bottom_stack + pin.height
             end
         end
     end
@@ -291,17 +277,9 @@ function M.remove_pin_at(spos)
 end
 
 function M.clear_pin()
-    for _,pin in ipairs(M.pins) do
-        if vim.api.nvim_win_is_valid(pin.win_id) then
-            vim.api.nvim_win_close(pin.win_id, true)
-        end
-
-        if vim.api.nvim_buf_is_valid(pin.source_buf) then
-            --vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_above)
-            --vim.api.nvim_buf_del_extmark(pin.source_buf, ns_id, pin.mark_below)
-        end
+    for i = #M.pins, 1, -1 do
+        M.pin_remove(i)
     end
-    M.pins = {}
 end
 
 function M.create_pin(pin, lines)
