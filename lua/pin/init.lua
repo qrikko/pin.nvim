@@ -225,7 +225,6 @@ function M.update_pin_position()
         end
     end
 
-    --local scrolloff = math.max(M.scrolloff, math.max(top_stack+2, bottom_stack+2))
     local scrolloff = M.scrolloff + math.max(top_stack+2, bottom_stack+2)
     vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
 end
@@ -383,6 +382,7 @@ function M.create_pin(pin, lines)
         "FloatBorder:pinvim_window_locked",
         {win=win_id}
     )
+    vim.api.nvim_set_option_value("scrolloff", 1, {win=pin.win_id})
 
     -- populate and push pin to storage
     pin.win_id = win_id
@@ -399,9 +399,6 @@ function M.create_pin(pin, lines)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos+pin.height+1, col})
         else
             vim.api.nvim_feedkeys('j', 'n', false)
-            vim.cmd("normal! zz")
-        --    local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
-        --    vim.api.nvim_win_set_cursor(main_window, {mrow+1, mcol})
         end
     end, { buffer = float_buf, silent = true })
 
@@ -412,11 +409,6 @@ function M.create_pin(pin, lines)
             vim.api.nvim_win_set_cursor(main_window, {pin.spos, col})
         else
             vim.api.nvim_feedkeys('k', 'n', false)
-            vim.cmd("normal! zz")
-            --[[
-            local mrow,mcol = unpack(vim.api.nvim_win_get_cursor(main_window))
-            vim.api.nvim_win_set_cursor(main_window, {mrow-1, mcol})
-            ]]
         end
     end, { buffer = float_buf, silent = true })
 
@@ -487,7 +479,7 @@ function M.pin_visual_selection()
     local epos = vim.fn.getpos("'>")[2]-1
 
     local from = math.min(spos, epos)
-    local to = math.max(spos, epos)
+    local to = math.max(spos, epos)+1
 
     local lines = vim.api.nvim_buf_get_lines(0, from, to, false)
 
@@ -498,7 +490,7 @@ function M.pin_visual_selection()
         spos = spos,
         epos = epos,
         top_line = 0,
-        height = epos-spos+1
+        height = to-from+1
     }
     M.create_pin(new_pin, lines)
 end
