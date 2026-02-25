@@ -74,7 +74,7 @@ M.config = {
     },
     symbol = {
         locked = {
-            bg = "#1a1024",
+            bg = "#11071b",
             fg = "#ff995f",
             sym = "󰌾 ",
             bold = true,
@@ -82,7 +82,7 @@ M.config = {
 
         },
         unlocked = {
-            bg = "#11071b",
+            bg = "#0a0014",
             fg = "#ff995f",
             sym = "󰿆 ",
             bold = true,
@@ -210,7 +210,8 @@ function M.update_pin_position()
                 sign_text = state.sym,
                 sign_hl_group = state.sym_hl,
                 number_hl_group = state.sym_hl,
-                priority = 100
+                priority = 100,
+                right_gravity = false
             })
 
             vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
@@ -227,6 +228,7 @@ function M.update_pin_position()
 
     local scrolloff = M.scrolloff + math.max(top_stack+2, bottom_stack+2)
     vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
+    ::continue::
 end
 
 function M.select_interactive(prompt)
@@ -433,25 +435,6 @@ function M.create_pin(pin, lines)
         end,
         desc = "Redirect cmdline to main window"
     })
-    --[[
-    vim.api.nvim_create_autocmd("TextChanged", {
-        buffer = float_buf,
-        callback = function()
-            local new_height = vim.api.nvim_buf_line_count(float_buf)
-            local diff = new_height - pin.height
-            pin.height_diff = pin.height_diff + diff
-            pin.height = new_height
-
-            vim.api.nvim_win_set_config(pin.win_id, {
-                relative = 'win',
-                win = main_window,
-                row = pin.spos,
-                col = gutter_w,
-                height = pin.height,
-            })
-        end
-    })
-    ]]
 
     vim.api.nvim_buf_attach(float_buf, false, {
         on_lines = function()
@@ -459,7 +442,6 @@ function M.create_pin(pin, lines)
             pin.is_syncing = true
 
             vim.schedule(function()
-
                 local new_lines = vim.api.nvim_buf_get_lines(float_buf, 0, -1, false)
                 local new_height = #new_lines
                 local old_height = pin.height
