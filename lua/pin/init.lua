@@ -433,19 +433,60 @@ function M.create_pin(pin, lines)
         end,
         desc = "Redirect cmdline to main window"
     })
+    --[[
+    vim.api.nvim_create_autocmd("TextChanged", {
+        buffer = float_buf,
+        callback = function()
+            local new_height = vim.api.nvim_buf_line_count(float_buf)
+            local diff = new_height - pin.height
+            pin.height_diff = pin.height_diff + diff
+            pin.height = new_height
 
-    -- setup handling for changes to keep main buffer synced with the floating window
+            vim.api.nvim_win_set_config(pin.win_id, {
+                relative = 'win',
+                win = main_window,
+                row = pin.spos,
+                col = gutter_w,
+                height = pin.height,
+            })
+        end
+    })
+    ]]
+
     vim.api.nvim_buf_attach(float_buf, false, {
-        on_lines = function(_, _, _, firstline, lastline, new_lastline)
-            local new_text = vim.api.nvim_buf_get_lines(float_buf, firstline, new_lastline, false)
-            --local mark = vim.api.nvim_buf_get_extmark_by_id(source_buf, ns_id, mark_start_id, {})
-            local pin_pos = pin.spos + vim.fn.line('.') -1
-
-            --local source_start = pin.spos + firstline
-            --local source_end = pin.spos+pin.height + lastline
+        on_lines = function()
+            if pin.is_syncing then return end
+            pin.is_syncing = true
 
             vim.schedule(function()
-                vim.api.nvim_buf_set_lines(source_buf, pin_pos, pin_pos+1, false, new_text)
+
+                local new_lines = vim.api.nvim_buf_get_lines(float_buf, 0, -1, false)
+                local new_height = #new_lines
+                local old_height = pin.height
+                local delta = new_height - old_height
+
+                vim.api.nvim_buf_set_lines(
+                    source_buf,
+                    pin.spos,
+                    pin.spos + old_height,
+                    false,
+                    new_lines
+                )
+
+                if delta ~= 0 then
+                    for _,other in ipairs(M.pins) do
+                        if other ~= pin and other.spos > pin.spos then
+                            other.spos = other.spos + delta
+                        end
+                    end
+                end
+
+                pin.height = new_height
+                vim.api.nvim_win_set_config(pin.win_id, {
+                    height = new_height
+                })
+
+                pin.is_syncing = false
             end)
         end
     })
