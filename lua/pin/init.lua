@@ -16,6 +16,28 @@ local function get_layout_details(win_id)
     return gutter_w, available_w
 end
 
+-- screen row of a 1 indexed buffer line in the main window, folds included.
+-- lines which are not displayed are pinned to the edge they scrolled out of.
+local function screen_row(lnum, top_lnum, bottom)
+    local row = vim.fn.screenpos(main_window, lnum, 1).row
+    if row > 0 then return row-1 end
+    if lnum < top_lnum then return -1 end
+    return bottom
+end
+
+-- buffer line to hang a sign on, kept inside the lines the main window shows.
+local function clamp_lnum(lnum, from, to)
+    return math.max(from, math.min(lnum, math.max(from, to)))
+end
+
+-- a sign inside a closed fold is never drawn, so move it onto the fold line
+local function sign_lnum(lnum, from, to)
+    lnum = clamp_lnum(lnum, from, to)
+    local fold = vim.fn.foldclosed(lnum)
+    if fold > 0 then lnum = clamp_lnum(fold, from, to) end
+    return lnum
+end
+
 local function create_backdrop()
     local buf = vim.api.nvim_create_buf(false, true)
 
@@ -116,7 +138,7 @@ function M.setup(user_config)
 
     if M.config.keymaps then
         vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinTS<CR>', {desc = "Pin TS Node"})
-        vim.keymap.set('v', M.config.keymaps.pin_visual, ':PinVisual<CR>', {desc = "Pin Visual Selection"})
+        vim.keymap.set('x', M.config.keymaps.pin_visual, '<Esc>:PinVisual<CR>', {desc = "Pin Visual Selection"})
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
         vim.keymap.set('n', M.config.keymaps.focus_next, ':PinFocusNext<CR>', {desc = "Jump to next pin"})
@@ -128,38 +150,41 @@ function M.setup(user_config)
 
     local group = vim.api.nvim_create_augroup("PinScrollLogic", {clear = false})
 
-    vim.api.nvim_create_autocmd({"WinScrolled", "CursorMoved"}, {
+    -- SafeState catches everything which relayouts the main window without
+    -- scrolling it, zc/zo/zO for instance. only a cursor move may pull the
+    -- focus into a pin, so that is the only event asking for focus.
+    vim.api.nvim_create_autocmd({"WinScrolled", "CursorMoved", "WinResized", "VimResized", "SafeState"}, {
         group = group,
-        callback = function() M.update_pin_position() end
+        callback = function(args)
+            M.update_pin_position(args.event == "CursorMoved")
+        end
     })
 
     did_setup = true
 end
 
-function M.update_pin_position()
+function M.update_pin_position(focus)
     if #M.pins == 0 then return end
 
     local current_win = vim.api.nvim_get_current_win()
     local gutter_w, usable_width = get_layout_details()
 
-    local view = vim.api.nvim_win_call(main_window, function()
-        return vim.fn.winsaveview()
-    end)
-
-    local scroll_top = (view.topline-1)
     local cursorpos = vim.api.nvim_win_get_cursor(current_win)[1]
     local main_buffer = vim.api.nvim_win_get_buf(main_window)
 
-    local top     = vim.fn.line('w0', main_window) -1
-    local bottom    = vim.fn.line('w$', main_window) - top
-    local buf_bottom = vim.fn.line('w$', main_window)
+    -- buffer lines the main window is currently showing, 1 indexed
+    local top_lnum  = vim.fn.line('w0', main_window)
+    local bot_lnum  = vim.fn.line('w$', main_window)
+    -- screen rows the pins have to be laid out in. a closed fold eats as many
+    -- rows as it has lines, so the window height is the only reliable bottom
+    local bottom = vim.api.nvim_win_get_height(main_window)
 
     local top_stack = 0
     local bottom_stack = 0
 
     for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
-            if pin.win_id ~= current_win then
+            if focus and pin.win_id ~= current_win then
                 local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
                 if is_active then
                     vim.api.nvim_set_current_win(pin.win_id)
@@ -170,47 +195,53 @@ function M.update_pin_position()
             end
             current_win = vim.api.nvim_get_current_win()
 
-            local pin_top = math.min(math.max(pin.spos-top, top_stack), bottom-pin.height)
+            local pin_top = math.min(math.max(screen_row(pin.spos+1, top_lnum, bottom), top_stack),
+                                     math.max(bottom-pin.height, 0))
             local pin_bottom = pin_top+pin.height
 
-            local state = nil
+            local state, sym_hl = nil, nil
             if pin_top <= top_stack or pin_bottom >= bottom then
-                state = M.config.symbol.pinned
-                state.sym_hl = "pinvim_symbol_pinned"
-                state.win_hl = "pinvim_window_pinned"
+                state, sym_hl = M.config.symbol.pinned, "pinvim_symbol_pinned"
             elseif current_win==pin.win_id then
-                state = M.config.symbol.unlocked
-                state.sym_hl = "pinvim_symbol_unlocked"
-                state.win_hl = "pinvim_window_unlocked"
+                state, sym_hl = M.config.symbol.unlocked, "pinvim_symbol_unlocked"
             else
-                state = M.config.symbol.locked
-                state.sym_hl = "pinvim_symbol_locked"
-                state.win_hl = "pinvim_window_locked"
+                state, sym_hl = M.config.symbol.locked, "pinvim_symbol_locked"
             end
 
-            vim.api.nvim_win_set_config(pin.win_id, {
-                relative = 'win',
-                win = main_window,
-                row = pin_top,
-                col = gutter_w,
-                width = usable_width,
-                height = pin.height,
-                focusable = false,
-            })
+            local placed = pin.placed
+            if not placed or placed.top ~= pin_top or placed.width ~= usable_width or placed.height ~= pin.height
+                or placed.win_hl ~= state.winhighlight then
+                vim.api.nvim_win_set_config(pin.win_id, {
+                    relative = 'win',
+                    win = main_window,
+                    row = pin_top,
+                    col = gutter_w,
+                    width = usable_width,
+                    height = pin.height,
+                    focusable = false,
+                })
+                vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
+                pin.placed = {
+                    top = pin_top,
+                    width = usable_width,
+                    height = pin.height,
+                    win_hl = state.winhighlight
+                }
+            end
 
-            local sign_top_row = math.max(pin.spos, scroll_top+top_stack)
-            sign_top_row = math.min(sign_top_row, buf_bottom-pin.height-bottom_stack)
-
-            vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_top_row, 0, {
-                id = pin.mark_pin_id,
-                sign_text = state.sym,
-                sign_hl_group = state.sym_hl,
-                number_hl_group = state.sym_hl,
-                priority = 100,
-                right_gravity = false
-            })
-
-            vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
+            -- 1 indexed, the +1 keeps the sign out of the rows the pin covers
+            local sign_row = sign_lnum(pin.spos+1, top_lnum+top_stack, bot_lnum-pin.height-bottom_stack+1)-1
+            if not placed or placed.sign_row ~= sign_row or placed.sym_hl ~= sym_hl or placed.sym ~= state.sym then
+                vim.api.nvim_buf_set_extmark(main_buffer, ns_id, sign_row, 0, {
+                    id = pin.mark_pin_id,
+                    sign_text = state.sym,
+                    sign_hl_group = sym_hl,
+                    number_hl_group = sym_hl,
+                    priority = 100,
+                    right_gravity = false
+                })
+                pin.placed.sign_row, pin.placed.sym_hl, pin.placed.sym = sign_row, sym_hl, state.sym
+            end
 
             if pin_top <= top_stack then
                 top_stack = top_stack + pin.height
@@ -223,8 +254,9 @@ function M.update_pin_position()
     end
 
     local scrolloff = M.scrolloff + math.max(top_stack+2, bottom_stack+2)
-    vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
-    ::continue::
+    if vim.api.nvim_get_option_value("scrolloff", {win=main_window}) ~= scrolloff then
+        vim.api.nvim_set_option_value("scrolloff", scrolloff, {win=main_window})
+    end
 end
 
 function M.select_interactive(prompt)
@@ -295,7 +327,7 @@ function M.pin_remove(index)
     vim.api.nvim_buf_del_extmark(main_buffer, ns_id, pin.mark_pin_id)
 
     table.remove(M.pins, index)
-    M.update_pin_position()
+    M.update_pin_position(true)
 end
 
 function M.remove_pin_at(spos)
@@ -469,7 +501,7 @@ function M.create_pin(pin, lines)
         end
     })
 
-    M.update_pin_position()
+    M.update_pin_position(true)
 end
 
 function M.pin_ts_node()
@@ -506,10 +538,10 @@ function M.pin_visual_selection()
         win_id = nil,
         buf_id = nil,
         source_buf = nil,
-        spos = spos,
-        epos = epos,
+        spos = from,
+        epos = to - 1,
         top_line = 0,
-        height = to-from+1
+        height = to-from
     }
     M.create_pin(new_pin, lines)
 end
