@@ -10,7 +10,7 @@ A plugin for pinning visual selection or tree-sitter nodes. Pins are kept visibl
     - unlocked 🔓
     - pinned 📌
 - ✓ Customizable keybindings for:
-    - 🌳 Pin tree sitter node
+    - 🌳 Pin tree sitter node, or unpin the pin at the cursor
     - 👀 Pin visual selection
     - 🖈 Remove current pin
     - 🗑 Remove all pins
@@ -19,6 +19,16 @@ A plugin for pinning visual selection or tree-sitter nodes. Pins are kept visibl
     -  ⎗ Jump to previous pin
     -  🔢 Jump to pin interactively
 - ✓ Editible pins and a good flow working with pins
+- ✓ Commands, so none of the above depends on a keymap:
+    - `:PinTS` pin the tree-sitter node at the cursor
+    - `:PinToggle` pin the node at the cursor, or unpin the pin at the cursor
+    - `:PinUnpin` remove the pin at the cursor
+    - `:PinVisual` pin the visual selection
+    - `:PinPop` remove the pin at the cursor, or the last pin
+    - `:PinRemove` remove a pin by id
+    - `:PinClear` remove all pins
+    - `:PinFocusNext` / `:PinFocusPrev` jump between pins
+    - `:PinFocusVisual` pick a pin and jump to it
 
 ## 📦 Installation
 Install the plugin with your preferred package manager:
@@ -41,6 +51,7 @@ lazy.nvim:
     winblend = 50,
     border = 'none', -- none, single, double, rounded, solid, shadow
     max_height = 15,
+    focus_on_create = false, -- pull the cursor into the new pin right away
     keymaps = {
         pin_ts              = '<leader>ss',
         pin_visual          = '<leader>ss',
