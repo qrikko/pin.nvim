@@ -1,12 +1,16 @@
 require('pin').setup()
 
+vim.api.nvim_create_user_command('PinScope', function()
+    require('pin').pin_scope()
+end, { desc = "Pin the tree-sitter node at the cursor, or the indentation block without a parser" })
+
 vim.api.nvim_create_user_command('PinTS', function()
     require('pin').pin_ts_node()
 end, { desc = "Pin the tree-sitter node at the cursor" })
 
 vim.api.nvim_create_user_command('PinToggle', function()
     require('pin').pin_toggle()
-end, { desc = "Pin the node at the cursor, or unpin the pin at the cursor" })
+end, { desc = "Pin the block at the cursor, or unpin the pin at the cursor" })
 
 vim.api.nvim_create_user_command('PinUnpin', function()
     local pin = require('pin')

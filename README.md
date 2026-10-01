@@ -1,6 +1,8 @@
 # pin.nvim
 
-A plugin for pinning visual selection or tree-sitter nodes. Pins are kept visible so that you can still view them while comparing one part of a file to another for example. Editing within a pin is seemless and integrated as portals to the main buffer giving a good flow.
+A plugin for pinning visual selections or code blocks. Pins are kept visible so that you can still view them while comparing one part of a file to another for example. Editing within a pin is seemless and integrated as portals to the main buffer giving a good flow.
+
+`:PinToggle` picks the smallest block around the cursor, the same one `za` would fold. It uses tree-sitter when the buffer has a parser installed and falls back to indentation when it does not, so pinning works in every filetype.
 
 <img width="961" height="1048" alt="image" src="https://github.com/user-attachments/assets/e5c093bd-5993-4134-aae4-2de7b1fd6227" />
 
@@ -10,7 +12,7 @@ A plugin for pinning visual selection or tree-sitter nodes. Pins are kept visibl
     - unlocked 🔓
     - pinned 📌
 - ✓ Customizable keybindings for:
-    - 🌳 Pin tree sitter node, or unpin the pin at the cursor
+    - 📌 Pin the block at the cursor, or unpin the pin at the cursor
     - 👀 Pin visual selection
     - 🖈 Remove current pin
     - 🗑 Remove all pins
@@ -20,8 +22,9 @@ A plugin for pinning visual selection or tree-sitter nodes. Pins are kept visibl
     -  🔢 Jump to pin interactively
 - ✓ Editible pins and a good flow working with pins
 - ✓ Commands, so none of the above depends on a keymap:
+    - `:PinScope` pin the tree-sitter node at the cursor, or the indentation block when there is no parser
     - `:PinTS` pin the tree-sitter node at the cursor
-    - `:PinToggle` pin the node at the cursor, or unpin the pin at the cursor
+    - `:PinToggle` pin the block at the cursor, or unpin the pin at the cursor
     - `:PinUnpin` remove the pin at the cursor
     - `:PinVisual` pin the visual selection
     - `:PinPop` remove the pin at the cursor, or the last pin

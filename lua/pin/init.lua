@@ -188,7 +188,7 @@ function M.setup(user_config)
     vim.api.nvim_set_hl(0, "pinvim_backdrop",    { bg=M.config.backdrop.bg, default = true })
 
     if M.config.keymaps then
-        vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinToggle<CR>', {desc = "Pin TS node at cursor, or unpin it"})
+        vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinToggle<CR>', {desc = "Pin the block at cursor, or unpin it"})
         vim.keymap.set('x', M.config.keymaps.pin_visual, '<Esc>:PinVisual<CR>', {desc = "Pin Visual Selection"})
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
@@ -637,6 +637,97 @@ function M.pin_range(bufnr, from, to)
     }, lines)
 end
 
+-- every foldable block in a buffer, by indentation alone. this mirrors
+-- nvim-ufo's indent provider so a pin lands on the same block `za` would fold,
+-- which is the behaviour to match when a buffer has no tree-sitter parser.
+-- levels are indent widths bucketed by shiftwidth, blank lines get -1 so they
+-- belong to no level and simply do not close the blocks they sit inside
+local function indent_levels(lines, tabstop, shiftwidth)
+    local levels = {}
+    for i, line in ipairs(lines) do
+        local width, level = 0, -1
+        for col = 1, #line do
+            local b = line:byte(col, col)
+            if b == 0x20 then
+                width = width + 1
+            elseif b == 0x09 then
+                width = width + (tabstop - (width % tabstop))
+            else
+                level = math.ceil(width / shiftwidth)
+                break
+            end
+        end
+        levels[i] = level
+    end
+    return levels
+end
+
+local function indent_folds(levels)
+    local folds, stack = {}, {}
+
+    -- a stack entry is the header line of a block still open. walking back up
+    -- the indentation levels closes every block at or below the level just left
+    local function close(cur_level, last_lnum)
+        while #stack > 0 do
+            local open = stack[#stack]
+            if open.level >= cur_level then
+                folds[#folds+1] = {open.lnum, last_lnum}
+                stack[#stack] = nil
+            else
+                break
+            end
+        end
+    end
+
+    local last_lnum, last_level = 1, levels[1]
+    for i = 1, #levels do
+        local level = levels[i]
+        if level >= 0 then
+            -- indented past the line above, so that line opens a block
+            if level > 0 and level > last_level then
+                stack[#stack+1] = {level = last_level, lnum = last_lnum}
+            elseif level < last_level then
+                close(level, last_lnum)
+            end
+            last_level, last_lnum = level, i
+        end
+    end
+    close(0, last_lnum)
+
+    return folds
+end
+
+-- the smallest block covering lnum, so the cursor on a nested body picks that
+-- body rather than the whole function around it
+local function indent_range(bufnr, lnum)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    if #lines == 0 then return nil end
+
+    local tabstop = vim.api.nvim_get_option_value('tabstop', {buf = bufnr})
+    if tabstop == 0 then tabstop = 8 end
+
+    local shiftwidth = vim.api.nvim_get_option_value('shiftwidth', {buf = bufnr})
+    if shiftwidth == 0 then shiftwidth = tabstop end
+
+    local folds = indent_folds(indent_levels(lines, tabstop, shiftwidth))
+    if #folds == 0 then return nil end
+
+    local best
+    for _, fold in ipairs(folds) do
+        if lnum >= fold[1] and lnum <= fold[2] then
+            -- ties go to the block starting later, which is the inner one
+            if not best or fold[1] > best[1] or (fold[1] == best[1] and fold[2] < best[2]) then
+                best = fold
+            end
+        end
+    end
+
+    -- nothing encloses the cursor, it is on a top level line of its own
+    if not best then return nil end
+
+    return best[1]-1, best[2]-1
+end
+
 -- the smallest named node around lnum/col which covers more than one line.
 -- get_node on its own hands back the token under the cursor, which pins a
 -- single line, and the buffer root when the cursor sits on blank space, which
@@ -665,16 +756,49 @@ local function ts_node_range(bufnr, lnum, col)
     return from, to
 end
 
+-- tree-sitter when the buffer has a parser, indentation when it does not. this
+-- mirrors the provider order nvim-ufo folds with, so pinning picks the same
+-- block folding would regardless of which parsers happen to be installed
+local function scope_range(bufnr, lnum, col)
+    local found, parser = pcall(vim.treesitter.get_parser, bufnr)
+
+    if found and parser then
+        -- the parser fills in lazily, a node is only there once the tree is built
+        pcall(function() parser:parse(true) end)
+
+        local from, to = ts_node_range(bufnr, lnum, col)
+        if from then return from, to end
+    end
+
+    return indent_range(bufnr, lnum)
+end
+
+function M.pin_scope()
+    local ctx = M.context()
+    local col = ctx.pin and 0 or vim.api.nvim_win_get_cursor(ctx.win)[2]
+
+    local from, to = scope_range(ctx.buf, ctx.lnum, col)
+    if not from then
+        vim.notify("Nothing to pin at cursor")
+        return
+    end
+
+    M.pin_range(ctx.buf, from, to)
+end
+
 function M.pin_ts_node()
     local ctx = M.context()
 
-    if not vim.treesitter.get_parser(ctx.buf) then
+    -- a missing parser raises rather than returning nil, so both the guard and
+    -- the value the call would have returned have to be checked
+    local found, parser = pcall(vim.treesitter.get_parser, ctx.buf)
+    if not (found and parser) then
         vim.notify("No tree-sitter parser for this buffer")
         return
     end
 
     -- the parser fills in lazily, a node is only there once the tree is built
-    vim.treesitter.get_parser(ctx.buf):parse(true)
+    pcall(function() parser:parse(true) end)
 
     local col = ctx.pin and 0 or vim.api.nvim_win_get_cursor(ctx.win)[2]
     local from, to = ts_node_range(ctx.buf, ctx.lnum, col)
@@ -686,8 +810,8 @@ function M.pin_ts_node()
     M.pin_range(ctx.buf, from, to)
 end
 
--- <leader>ss in normal mode: get rid of the pin under the cursor, otherwise
--- pin the tree-sitter node at the cursor
+-- <leader>ss in normal mode: get rid of the pin under the cursor, otherwise pin
+-- the block at the cursor
 function M.pin_toggle()
     local ctx = M.context()
     local idx = M.pin_at_lnum(ctx.buf, ctx.lnum)
@@ -695,7 +819,7 @@ function M.pin_toggle()
     if idx then
         M.pin_remove(idx)
     else
-        M.pin_ts_node()
+        M.pin_scope()
     end
 end
 
