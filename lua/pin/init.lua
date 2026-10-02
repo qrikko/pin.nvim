@@ -204,7 +204,7 @@ function M.setup(user_config)
     -- SafeState catches everything which relayouts the main window without
     -- scrolling it, zc/zo/zO for instance. only a cursor move may pull the
     -- focus into a pin, so that is the only event asking for focus.
-    vim.api.nvim_create_autocmd({"WinScrolled", "CursorMoved", "WinResized", "VimResized", "SafeState"}, {
+    vim.api.nvim_create_autocmd({"WinScrolled", "CursorMoved", "WinResized", "VimResized", "SafeState", "BufEnter", "ModeChanged", "WinEnter"}, {
         group = group,
         callback = function(args)
             M.update_pin_position(args.event == "CursorMoved")
@@ -264,10 +264,13 @@ function M.update_pin_position(focus)
 
     for i, pin in ipairs(M.pins) do
         if vim.api.nvim_win_is_valid(pin.win_id) then
-            local vis_h = math.min(pin.height, max_h)
+            -- height in screen lines: can change if folds exist inside pin window
+            local win_h_pin = vim.api.nvim_win_get_height(pin.win_id)
+            local text_h = vim.api.nvim_win_text_height(pin.win_id, {})
+            local vis_h = math.min((text_h and text_h.all) or pin.height, max_h)
 
             if focus and pin.win_id ~= current_win then
-                local is_active = cursorpos > pin.spos and cursorpos < pin.epos+2
+                local is_active = cursorpos > pin.spos and cursorpos < pin.spos+2
                 if is_active then
                     vim.api.nvim_set_current_win(pin.win_id)
                     local r,c = unpack(vim.api.nvim_win_get_cursor(anchor))
@@ -291,25 +294,26 @@ function M.update_pin_position(focus)
             end
 
             local placed = pin.placed
-            if not placed or placed.top ~= pin_top or placed.width ~= usable_width or placed.height ~= vis_h
-                or placed.win_hl ~= state.winhighlight then
-                vim.api.nvim_win_set_config(pin.win_id, {
-                    relative = 'win',
-                    win = anchor,
-                    row = pin_top,
-                    col = gutter_w,
-                    width = usable_width,
-                    height = vis_h,
-                    focusable = false,
-                })
-                vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
-                pin.placed = {
-                    top = pin_top,
-                    width = usable_width,
-                    height = vis_h,
-                    win_hl = state.winhighlight
-                }
+            -- always update height to match text height when folds change
+            if vim.api.nvim_win_get_height(pin.win_id) ~= vis_h then
+                vim.api.nvim_win_set_height(pin.win_id, vis_h)
             end
+            vim.api.nvim_win_set_config(pin.win_id, {
+                relative = 'win',
+                win = anchor,
+                row = pin_top,
+                col = gutter_w,
+                width = usable_width,
+                height = vis_h,
+                focusable = false,
+            })
+            vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
+            pin.placed = {
+                top = pin_top,
+                width = usable_width,
+                height = vis_h,
+                win_hl = state.winhighlight
+            }
 
             -- 1 indexed, the +1 keeps the sign out of the rows the pin covers
             local sign_row = sign_lnum(pin.spos+1, top_lnum+top_stack, bot_lnum-vis_h-bottom_stack+1)-1
@@ -504,6 +508,23 @@ function M.create_pin(pin, lines)
     local ft = vim.bo[source_buf].filetype
     vim.api.nvim_set_option_value('modifiable', true, {buf = float_buf})
     vim.api.nvim_set_option_value('filetype', ft, { buf = float_buf })
+    -- copy fold settings so folds behave similarly inside pin
+    pcall(function()
+        local fm = vim.bo[source_buf].foldmethod
+        if fm and fm ~= '' then
+            vim.api.nvim_set_option_value('foldmethod', fm, {buf = float_buf})
+        end
+        local fe = vim.bo[source_buf].foldexpr
+        if fe and fe ~= '' then
+            vim.api.nvim_set_option_value('foldexpr', fe, {buf = float_buf})
+        end
+        local fcs = vim.bo[source_buf].foldcolumn
+        if fcs then
+            vim.api.nvim_set_option_value('foldcolumn', fcs, {buf = float_buf})
+        end
+        local fdn = vim.bo[source_buf].foldenable
+        vim.api.nvim_set_option_value('foldenable', fdn, {buf = float_buf})
+    end)
     pcall(vim.treesitter.start, float_buf, ft)
 
     pin.mark_pin_id = vim.api.nvim_buf_set_extmark(source_buf, ns_id, pin.spos, 0, {})
@@ -568,6 +589,18 @@ function M.create_pin(pin, lines)
         vim.cmd("normal! gg")
     end, { buffer = float_buf, silent = true })
 
+    -- update layout when folds change inside the pin
+    pcall(function()
+        vim.api.nvim_create_autocmd({"FoldUpdated", "CursorMoved", "WinScrolled", "TextChanged", "TextChangedI", "ModeChanged", "BufWinEnter", "WinEnter"}, {
+            buffer = float_buf,
+            callback = function()
+                vim.schedule(function()
+                    M.update_pin_position(false)
+                end)
+            end,
+        })
+    end)
+
     vim.api.nvim_buf_attach(float_buf, false, {
         on_lines = function()
             if pin.is_syncing then return end
@@ -600,9 +633,6 @@ function M.create_pin(pin, lines)
                 pin.height = new_height
                 pin.epos = pin.spos + new_height - 1
                 pin.placed = nil
-                vim.api.nvim_win_set_config(pin.win_id, {
-                    height = new_height
-                })
 
                 pin.is_syncing = false
             end)
