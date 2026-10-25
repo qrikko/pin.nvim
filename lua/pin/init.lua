@@ -128,9 +128,8 @@ M.config = {
     winblend = 50,
     border = 'none', -- none, single, double, rounded, solid, shadow
     max_height = 15,
-    -- pull the cursor into the new pin right away. leaving it in the main
-    -- window is friendlier, the pin is still one cursor move away
-    focus_on_create = false,
+    -- move the cursor into the new pin as soon as it is created
+    focus_on_create = true,
     keymaps = {
         pin_ts              = '<leader>ss',
         pin_visual          = '<leader>ss',
@@ -270,7 +269,10 @@ function M.update_pin_position(focus)
             local vis_h = math.min((text_h and text_h.all) or pin.height, max_h)
 
             if focus and pin.win_id ~= current_win then
-                local is_active = cursorpos > pin.spos and cursorpos < pin.spos+2
+                -- any line covered by the pin pulls focus into it. entering
+                -- from below lands on the last line, not the first, so
+                -- checking only spos+1 made moving up with `k` a no-op
+                local is_active = cursorpos > pin.spos and cursorpos <= pin.spos+pin.height
                 if is_active then
                     vim.api.nvim_set_current_win(pin.win_id)
                     local r,c = unpack(vim.api.nvim_win_get_cursor(anchor))
@@ -305,7 +307,7 @@ function M.update_pin_position(focus)
                 col = gutter_w,
                 width = usable_width,
                 height = vis_h,
-                focusable = false,
+                focusable = current_win == pin.win_id,
             })
             vim.api.nvim_set_option_value("winhighlight", state.winhighlight, {win=pin.win_id})
             pin.placed = {
@@ -476,24 +478,83 @@ function M.pin_focus(id)
     M.focused_id = id
 end
 
-function M.pin_focus_next()
-    if #M.pins == 0 then
+-- pins are kept in the order they were created, but moving to the next/previous
+-- one has to follow the order they appear in the buffer. otherwise pinning
+-- blocks out of document order makes next skip over a pin and go the wrong way
+local function sorted_pin_ids()
+    local ids = {}
+    for i, pin in ipairs(M.pins) do
+        if vim.api.nvim_win_is_valid(pin.win_id) then
+            ids[#ids+1] = i
+        end
+    end
+    table.sort(ids, function(a, b)
+        local pa, pb = M.pins[a], M.pins[b]
+        if pa.source_buf ~= pb.source_buf then
+            return pa.source_buf < pb.source_buf
+        end
+        return pa.spos < pb.spos
+    end)
+    return ids
+end
+
+local function step_pin(dir)
+    local ids = sorted_pin_ids()
+    if #ids == 0 then
         vim.notify("No pins to jump to!")
         return
     end
-    M.focused_id = (M.focused_id or 0) + 1
-    local id = (M.focused_id > #M.pins) and 1 or M.focused_id
-    M.pin_focus(id)
+
+    -- where we are in that order: the focused pin, else the pin under the cursor
+    local current = M.index_win_id(vim.api.nvim_get_current_win())
+    local pos
+    if current then
+        for k, id in ipairs(ids) do
+            if id == current then pos = k break end
+        end
+    else
+        local ctx = M.context()
+        current = M.pin_at_lnum(ctx.buf, ctx.lnum)
+        for k, id in ipairs(ids) do
+            if id == current then pos = k break end
+        end
+    end
+
+    if pos then
+        local target = ((pos - 1 + dir) % #ids) + 1
+        M.pin_focus(ids[target])
+        return
+    end
+
+    -- not on a pin at all, start from the cursor line and walk outwards in
+    -- buffer order rather than from whatever pin happened to be focused last
+    local ctx = M.context()
+    local target
+    if dir > 0 then
+        for _, id in ipairs(ids) do
+            local pin = M.pins[id]
+            if pin.source_buf == ctx.buf and pin.spos + 1 > ctx.lnum then
+                target = id
+                break
+            end
+        end
+    else
+        for _, id in ipairs(ids) do
+            local pin = M.pins[id]
+            if pin.source_buf == ctx.buf and pin.epos + 1 < ctx.lnum then
+                target = id
+            end
+        end
+    end
+    M.pin_focus(target or ids[dir > 0 and 1 or #ids])
+end
+
+function M.pin_focus_next()
+    step_pin(1)
 end
 
 function M.pin_focus_prev()
-    if #M.pins == 0 then
-        vim.notify("No pins to jump to!")
-        return
-    end
-    M.focused_id = (M.focused_id or #M.pins+1) - 1
-    local id = (M.focused_id < 1) and #M.pins or M.focused_id
-    M.pin_focus(id)
+    step_pin(-1)
 end
 
 function M.create_pin(pin, lines)
@@ -639,7 +700,19 @@ function M.create_pin(pin, lines)
         end
     })
 
-    M.update_pin_position(M.config.focus_on_create and true or false)
+    M.update_pin_position(false)
+
+    if M.config.focus_on_create then
+        local row, col = 1, 0
+        if vim.api.nvim_win_get_buf(anchor) == source_buf then
+            local cursor = vim.api.nvim_win_get_cursor(anchor)
+            row, col = cursor[1] - pin.spos, cursor[2]
+        end
+        row = math.max(1, math.min(row, #lines))
+
+        vim.api.nvim_set_current_win(win_id)
+        vim.api.nvim_win_set_cursor(win_id, {row, col})
+    end
 end
 
 -- pin a range of a source buffer, from/to are 0 indexed and inclusive

@@ -54,7 +54,7 @@ lazy.nvim:
     winblend = 50,
     border = 'none', -- none, single, double, rounded, solid, shadow
     max_height = 15,
-    focus_on_create = false, -- pull the cursor into the new pin right away
+    focus_on_create = true, -- pull the cursor into the new pin right away
     keymaps = {
         pin_ts              = '<leader>ss',
         pin_visual          = '<leader>ss',
