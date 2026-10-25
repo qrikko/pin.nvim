@@ -133,6 +133,7 @@ M.config = {
     keymaps = {
         pin_ts              = '<leader>ss',
         pin_visual          = '<leader>ss',
+        pin_siblings        = '<leader>sa',
         clear_all_pins      = '<leader>sx',
         pin_pop             = '<leader>sp',
         pin_remove          = '<leader>sd',
@@ -187,8 +188,12 @@ function M.setup(user_config)
     vim.api.nvim_set_hl(0, "pinvim_backdrop",    { bg=M.config.backdrop.bg, default = true })
 
     if M.config.keymaps then
-        vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinToggle<CR>', {desc = "Pin the block at cursor, or unpin it"})
+        vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinToggle<CR>', {desc = "Pin the block at the cursor, or unpin it"})
         vim.keymap.set('x', M.config.keymaps.pin_visual, '<Esc>:PinVisual<CR>', {desc = "Pin Visual Selection"})
+        if M.config.keymaps.pin_siblings then
+            pcall(vim.keymap.del, 'n', M.config.keymaps.pin_siblings)
+            vim.keymap.set('n', M.config.keymaps.pin_siblings, function() M.pin_ts_siblings() end, {desc = "Pin all sibling tree-sitter nodes at same level", noremap = true, silent = true, nowait = true})
+        end
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
         vim.keymap.set('n', M.config.keymaps.focus_next, ':PinFocusNext<CR>', {desc = "Jump to next pin"})
@@ -911,6 +916,52 @@ function M.pin_ts_node()
     end
 
     M.pin_range(ctx.buf, from, to)
+end
+
+-- Pin all sibling tree-sitter nodes at the same level with the same parent
+function M.pin_ts_siblings()
+    vim.notify("pin_ts_siblings called", vim.log.levels.INFO)
+    local ctx = M.context()
+    local bufnr = ctx.buf
+
+    local found, parser = pcall(vim.treesitter.get_parser, bufnr)
+    if not (found and parser) then
+        vim.notify("No tree-sitter parser for this buffer")
+        return
+    end
+
+    pcall(function() parser:parse(true) end)
+
+    local pos = ctx.pin and { ctx.lnum - 1, 0 } or vim.api.nvim_win_get_cursor(ctx.win)
+    local row, col = pos[1] - 1, pos[2]
+    local node = vim.treesitter.get_node({ buf = bufnr, pos = { row, col } })
+    if not node then
+        -- try to get node at start of line
+        node = vim.treesitter.get_node({ buf = bufnr, pos = { row, 0 } })
+    end
+    if not node then
+        vim.notify("No tree-sitter node at cursor")
+        return
+    end
+
+    local parent = node:parent()
+    if not parent then
+        vim.notify("No parent node")
+        return
+    end
+
+    local children = parent:named_children()
+    if #children == 0 then
+        vim.notify("No sibling nodes to pin")
+        return
+    end
+
+    vim.notify("Pinning " .. #children .. " siblings", vim.log.levels.INFO)
+    for i = #children, 1, -1 do
+        local child = children[i]
+        local from, _, to, _ = child:range()
+        M.pin_range(bufnr, from, to)
+    end
 end
 
 -- <leader>ss in normal mode: get rid of the pin under the cursor, otherwise pin

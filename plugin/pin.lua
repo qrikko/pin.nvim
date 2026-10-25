@@ -1,5 +1,8 @@
 require('pin').setup()
 
+pcall(vim.keymap.del, 'n', '<leader>sa')
+vim.keymap.set('n', '<leader>sa', function() require('pin').pin_ts_siblings() end, {desc = "Pin all sibling tree-sitter nodes", noremap = true, silent = true, nowait = true})
+
 vim.api.nvim_create_user_command('PinScope', function()
     require('pin').pin_scope()
 end, { desc = "Pin the tree-sitter node at the cursor, or the indentation block without a parser" })
@@ -7,6 +10,10 @@ end, { desc = "Pin the tree-sitter node at the cursor, or the indentation block 
 vim.api.nvim_create_user_command('PinTS', function()
     require('pin').pin_ts_node()
 end, { desc = "Pin the tree-sitter node at the cursor" })
+
+vim.api.nvim_create_user_command('PinSiblings', function()
+    require('pin').pin_ts_siblings()
+end, { desc = "Pin all sibling tree-sitter nodes at same level with same parent" })
 
 vim.api.nvim_create_user_command('PinToggle', function()
     require('pin').pin_toggle()
