@@ -1,5 +1,13 @@
 local M = {pins = {}, topfill = 0}
 
+local function debug_log(fmt, ...)
+    if not vim.env.PIN_DEBUG then return end
+    local f = io.open('/tmp/pin-debug.log', 'a')
+    if not f then return end
+    f:write(('%d '):format(vim.uv.now()), fmt:format(...), '\n')
+    f:close()
+end
+
 local ns_id = vim.api.nvim_create_namespace("PinPlugin")
 local main_window = vim.api.nvim_get_current_win()
 local backdrop_win = nil
@@ -187,12 +195,84 @@ function M.setup(user_config)
 
     vim.api.nvim_set_hl(0, "pinvim_backdrop",    { bg=M.config.backdrop.bg, default = true })
 
+    -- Integrate with flash.nvim to include pin windows
+    vim.schedule(function()
+        pcall(function()
+            local config = require("flash.config")
+            if not (config and config.get) then return end
+            local c = config.get()
+            if not (c and c.search) then return end
+            if not c.search.exclude then c.search.exclude = {} end
+            local new_exclude = {}
+            table.insert(new_exclude, function(win)
+                if M.index_win_id and M.index_win_id(win) ~= nil then
+                    return false -- never exclude pin windows
+                end
+                return nil
+            end)
+            for _, exclude in ipairs(c.search.exclude) do
+                if type(exclude) == "string" then
+                    table.insert(new_exclude, exclude)
+                elseif type(exclude) == "function" then
+                    table.insert(new_exclude, function(win)
+                        if M.index_win_id and M.index_win_id(win) ~= nil then
+                            return false
+                        end
+                        local res = exclude(win)
+                        if res == nil then return nil end
+                        return res
+                    end)
+                end
+            end
+            c.search.exclude = new_exclude
+            if config.set then config.set(c) end
+        end)
+    end)
+
+    vim.schedule(function()
+        pcall(function()
+            local jump = require("flash.jump")
+            if jump._pin_hooked then return end
+            jump._pin_hooked = true
+            local jump_orig = jump.jump
+            jump.jump = function(match, state, ...)
+                local win = vim.api.nvim_get_current_win()
+                debug_log('flash jump start current=%d cursor=%s mode=%s target_win=%d target=%s',
+                    win, vim.inspect(vim.api.nvim_win_get_cursor(win)), vim.fn.mode(),
+                    match.win, vim.inspect(match.pos))
+                -- a jump into a pin leaves the anchor cursor behind. block
+                -- focus pulls for a moment so a following motion is not
+                -- applied to the stale anchor position instead of the target.
+                if match.win and M.index_win_id(match.win) then
+                    M._flash_pin_jump_until = vim.uv.now() + 1000
+                end
+                local res = jump_orig(match, state, ...)
+                win = vim.api.nvim_get_current_win()
+                debug_log('flash jump end current=%d cursor=%s mode=%s',
+                    win, vim.inspect(vim.api.nvim_win_get_cursor(win)), vim.fn.mode())
+                return res
+            end
+        end)
+        pcall(function()
+            local state = require("flash.state")
+            if state._pin_debug_hooked then return end
+            state._pin_debug_hooked = true
+            local hide_orig = state.hide
+            state.hide = function(self, ...)
+                local win = vim.api.nvim_get_current_win()
+                debug_log('flash hide current=%d cursor=%s mode=%s visible=%s',
+                    win, vim.inspect(vim.api.nvim_win_get_cursor(win)), vim.fn.mode(), tostring(self.visible))
+                return hide_orig(self, ...)
+            end
+        end)
+    end)
+
     if M.config.keymaps then
         vim.keymap.set('n', M.config.keymaps.pin_ts, ':PinToggle<CR>', {desc = "Pin the block at the cursor, or unpin it"})
         vim.keymap.set('x', M.config.keymaps.pin_visual, '<Esc>:PinVisual<CR>', {desc = "Pin Visual Selection"})
         if M.config.keymaps.pin_siblings then
             pcall(vim.keymap.del, 'n', M.config.keymaps.pin_siblings)
-            vim.keymap.set('n', M.config.keymaps.pin_siblings, function() M.pin_ts_siblings() end, {desc = "Pin all sibling tree-sitter nodes at same level", noremap = true, silent = true, nowait = true})
+            vim.keymap.set('n', M.config.keymaps.pin_siblings, '<Cmd>PinSiblings<CR>', {desc = "Pin all sibling tree-sitter nodes at same level", silent = true})
         end
         vim.keymap.set('n', M.config.keymaps.pin_remove, ':PinRemove<CR>', {desc = "Pin Interactive Remove"})
         vim.keymap.set('n', M.config.keymaps.pin_pop, ':PinPop<CR>', {desc = "Pop the last Pin"})
@@ -202,6 +282,16 @@ function M.setup(user_config)
 
         vim.keymap.set({'n','v'}, M.config.keymaps.clear_all_pins, ':PinClear<CR>', {desc = "Clear ALL Pins"})
     end
+
+    vim.api.nvim_create_autocmd("ModeChanged", {
+        group = vim.api.nvim_create_augroup("PinDebugMode", {clear = true}),
+        callback = function(args)
+            local win = vim.api.nvim_get_current_win()
+            debug_log('mode %s->%s win=%d cursor=%s visual_start=%s',
+                args.match, vim.fn.mode(), win,
+                vim.inspect(vim.api.nvim_win_get_cursor(win)), vim.inspect(vim.fn.getpos('v')))
+        end,
+    })
 
     local group = vim.api.nvim_create_augroup("PinScrollLogic", {clear = false})
 
@@ -215,14 +305,17 @@ function M.setup(user_config)
         end
     })
 
-    -- a pin is only a view onto the main buffer, so a command typed from inside
-    -- one has to act on the main window. CmdLineEnter fires on the first :, so
-    -- the switch has to be deferred, doing it inline throws the command line
-    -- away. this used to run for every command line in the editor, once per pin
-    -- ever made, so it now only steps in when a pin actually has focus
+    -- a pin is only a view onto the main buffer, so an ex command typed from
+    -- inside one has to act on the main window. CmdLineEnter fires on the first
+    -- :, so the switch has to be deferred, doing it inline throws the command
+    -- line away. this used to run for every command line in the editor, once per
+    -- pin ever made, so it now only steps in when a pin actually has focus.
+    -- searches (/ and ?) must stay in the pin they were started from, otherwise
+    -- the jump lands in the main window and is pulled back into a pin afterwards
     vim.api.nvim_create_autocmd('CmdLineEnter', {
         group = vim.api.nvim_create_augroup("PinCmdline", {clear = true}),
         callback = function()
+            if vim.fn.getcmdtype() ~= ':' then return end
             if not M.index_win_id(vim.api.nvim_get_current_win()) then return end
             vim.defer_fn(function()
                 vim.api.nvim_set_current_win(anchor_window())
@@ -234,8 +327,27 @@ function M.setup(user_config)
     did_setup = true
 end
 
+local function flash_is_active()
+    local ok, flash_state = pcall(require, "flash.state")
+    if not (ok and type(flash_state._states) == "table") then return false end
+    for state in pairs(flash_state._states) do
+        if state.visible then return true end
+    end
+    return false
+end
+
 function M.update_pin_position(focus)
     local anchor = anchor_window()
+    local start_win = vim.api.nvim_get_current_win()
+    local start_mode = vim.fn.mode()
+    local protect_visual = (start_mode == 'v' or start_mode == 'V' or start_mode == '\22')
+        and M.index_win_id(start_win) ~= nil
+    local saved_cursor = protect_visual and vim.api.nvim_win_get_cursor(start_win) or nil
+    if protect_visual then
+        debug_log('update visual focus=%s win=%d cursor=%s', tostring(focus), start_win, vim.inspect(saved_cursor))
+        -- never touch a pin while a visual selection is being made in it
+        return
+    end
 
     -- the last pin is gone, hand the main window its scrolloff back
     if #M.pins == 0 then
@@ -274,17 +386,43 @@ function M.update_pin_position(focus)
             local vis_h = math.min((text_h and text_h.all) or pin.height, max_h)
 
             if focus and pin.win_id ~= current_win then
+                -- Don't interfere if we're currently in a pin window
+                if M.index_win_id(current_win) then
+                    goto continue
+                end
+                -- Don't interfere if flash is active
+                if flash_is_active() then
+                    goto continue
+                end
+                -- A flash jump into a pin leaves the main anchor cursor at
+                -- its old position. Don't map that stale position back over
+                -- the flash target while the jump is still settling.
+                if M._flash_pin_jump_until and vim.uv.now() < M._flash_pin_jump_until then
+                    goto continue
+                end
+                -- Switching windows while a visual selection is active drops
+                -- the selection. A jump can be slow enough that the resulting
+                -- CursorMoved is handled after `v` was pressed, so leave the
+                -- focus alone until the selection has been acted on.
+                local mode = vim.fn.mode()
+                if mode == 'v' or mode == 'V' or mode == '\22' then
+                    goto continue
+                end
                 -- any line covered by the pin pulls focus into it. entering
                 -- from below lands on the last line, not the first, so
                 -- checking only spos+1 made moving up with `k` a no-op
                 local is_active = cursorpos > pin.spos and cursorpos <= pin.spos+pin.height
                 if is_active then
-                    vim.api.nvim_set_current_win(pin.win_id)
                     local r,c = unpack(vim.api.nvim_win_get_cursor(anchor))
+                    debug_log('focus pull pin=%d current=%d anchor=%s pin_cursor=%s -> {%d,%d}',
+                        pin.win_id, current_win, vim.inspect(vim.api.nvim_win_get_cursor(anchor)),
+                        vim.inspect(vim.api.nvim_win_get_cursor(pin.win_id)), r-pin.spos, c)
+                    vim.api.nvim_set_current_win(pin.win_id)
                     vim.api.nvim_win_set_cursor(pin.win_id, {r-pin.spos, c})
                     M.focused_id = i
                 end
             end
+            ::continue::
             current_win = vim.api.nvim_get_current_win()
 
             local pin_top = math.min(math.max(screen_row(pin.spos+1, top_lnum, bottom), top_stack),
@@ -920,7 +1058,6 @@ end
 
 -- Pin all sibling tree-sitter nodes at the same level with the same parent
 function M.pin_ts_siblings()
-    vim.notify("pin_ts_siblings called", vim.log.levels.INFO)
     local ctx = M.context()
     local bufnr = ctx.buf
 
@@ -932,12 +1069,16 @@ function M.pin_ts_siblings()
 
     pcall(function() parser:parse(true) end)
 
-    local pos = ctx.pin and { ctx.lnum - 1, 0 } or vim.api.nvim_win_get_cursor(ctx.win)
-    local row, col = pos[1] - 1, pos[2]
-    local node = vim.treesitter.get_node({ buf = bufnr, pos = { row, col } })
+    local row, col
+    if ctx.pin then
+        row, col = ctx.lnum - 1, 0
+    else
+        local cursor = vim.api.nvim_win_get_cursor(ctx.win)
+        row, col = cursor[1] - 1, cursor[2]
+    end
+    local node = vim.treesitter.get_node({ buf = bufnr, bufnr = bufnr, pos = { row, col } })
     if not node then
-        -- try to get node at start of line
-        node = vim.treesitter.get_node({ buf = bufnr, pos = { row, 0 } })
+        node = vim.treesitter.get_node({ buf = bufnr, bufnr = bufnr, pos = { row, 0 } })
     end
     if not node then
         vim.notify("No tree-sitter node at cursor")
@@ -956,7 +1097,6 @@ function M.pin_ts_siblings()
         return
     end
 
-    vim.notify("Pinning " .. #children .. " siblings", vim.log.levels.INFO)
     for i = #children, 1, -1 do
         local child = children[i]
         local from, _, to, _ = child:range()
